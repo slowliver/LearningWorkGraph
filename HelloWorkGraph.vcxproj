@@ -101,6 +101,11 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <CopyFileToFolders Include="Shader\Shader.shader">
+      <FileType>Document</FileType>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Identity)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity)</DestinationFileName>
+    </CopyFileToFolders>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Framework.h" />

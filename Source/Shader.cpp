@@ -69,10 +69,12 @@ namespace LearningWorkGraph
 {
 Shader::~Shader()
 {
+	Release();
 }
 
-bool Shader::Compile(std::string_view source)
+bool Shader::CompileFromMemory(std::string_view source)
 {
+	Release();
 	auto utils = g_dxcompiler->GetUtils();
 	CComPtr<IDxcBlobEncoding> sourceBlob;
 	if (SUCCEEDED(utils->CreateBlob(source.data(), source.size(), 0, &sourceBlob)))
@@ -89,11 +91,26 @@ bool Shader::Compile(std::string_view source)
 				result->GetResult((IDxcBlob**)&data);
 				m_compilerBufferData = std::unique_ptr<std::byte[]>(new std::byte[data->GetBufferSize()]);
 				m_compilerBufferDataSize = data->GetBufferSize();
-				std::memcpy(m_compilerBufferData.get(), data->GetBufferPointer(), data->GetBufferSize());
+				std::memcpy(m_compilerBufferData.get(), data->GetBufferPointer(), m_compilerBufferDataSize);
 				return true;
 			}
 		}
 	}
 	return false;
+}
+
+bool Shader::CompileFromFile(std::string_view filePath)
+{
+	printf(filePath.data());
+	char fullFilePath[MAX_PATH];
+	GetFullPathNameA(filePath.data(), MAX_PATH, fullFilePath, NULL);
+	printf(fullFilePath);
+	return true;
+}
+
+void Shader::Release()
+{
+	m_compilerBufferData.reset();
+	m_compilerBufferDataSize = 0;
 }
 }

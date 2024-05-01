@@ -150,7 +150,7 @@ void CompileGWGLibrary()
 		"    Output.Store3(0, uint3(0x6C6C6548, 0x6F57206F, 0x00646C72));"
 		"}";
 
-	shader.Compile(kSourceCode);
+	shader.CompileFromFile("Shader/Shader.shader");
 }
 
 ID3D12RootSignature* CreateGlobalRootSignature(CComPtr<ID3D12Device9> pDevice)

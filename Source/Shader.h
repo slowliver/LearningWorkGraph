@@ -15,11 +15,15 @@ class Shader
 {
 public:
 	~Shader();
-	bool Compile(std::string_view source);
+	bool CompileFromMemory(std::string_view source);
+	bool CompileFromFile(std::string_view filePath);
 //	void Map(const char* sourcePath);
 
 	const void* GetData() const { return m_compilerBufferData.get(); }
 	size_t GetSize() const { return m_compilerBufferDataSize; }
+
+private:
+	void Release();
 
 private:
 	std::unique_ptr<std::byte[]> m_compilerBufferData = nullptr;
