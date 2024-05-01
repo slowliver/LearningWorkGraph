@@ -5,6 +5,8 @@
 #include "Framework.h"
 
 #include <memory>
+#include <vector>
+#include <cstdio>
 
 class DXCompiler
 {
@@ -101,11 +103,22 @@ bool Shader::CompileFromMemory(std::string_view source)
 
 bool Shader::CompileFromFile(std::string_view filePath)
 {
-	printf(filePath.data());
 	char fullFilePath[MAX_PATH];
 	GetFullPathNameA(filePath.data(), MAX_PATH, fullFilePath, NULL);
-	printf(fullFilePath);
-	return true;
+	FILE* file = std::fopen(fullFilePath, "r");
+	if (!file)
+	{
+		return false;
+	}
+	auto memory = std::vector<char>();
+	memory.reserve(4096);
+	int c = 0;
+	while ((c = std::fgetc(file)) != EOF)
+	{
+		memory.push_back((char)c);
+	}
+	std::fclose(file);
+	return CompileFromMemory(std::string(memory.begin(), memory.end()));
 }
 
 void Shader::Release()

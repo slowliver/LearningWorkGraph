@@ -39,7 +39,6 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 ID3D12Device9* InitializeDirectX();
 void ShutdownDirectX();
 bool EnsureWorkGraphsSupported(CComPtr<ID3D12Device9> pDevice);
-void CompileGWGLibrary();
 ID3D12RootSignature* CreateGlobalRootSignature(CComPtr<ID3D12Device9> pDevice);
 ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, const LearningWorkGraph::Shader& shader);
 D3D12_SET_PROGRAM_DESC PrepareWorkGraph(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12StateObject> pStateObject);
@@ -54,7 +53,7 @@ int main()
 		CComPtr<ID3D12Device9> pDevice = InitializeDirectX();
 		if (EnsureWorkGraphsSupported(pDevice))
 		{
-			CompileGWGLibrary();
+			shader.CompileFromFile("Shader/Shader.shader");
 
 			CComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature(pDevice);
 
@@ -134,23 +133,6 @@ bool EnsureWorkGraphsSupported(CComPtr<ID3D12Device9> pDevice)
 		"Failed to ensure work graphs were supported. Check driver and graphics card.");
 
 	return (Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED);
-}
-
-void CompileGWGLibrary()
-{
-	static const char kSourceCode[] =
-		"RWByteAddressBuffer Output : register(u0);"
-		""
-		"[Shader(\"node\")]"
-		"[NodeLaunch(\"broadcasting\")]"
-		"[NodeDispatchGrid(1, 1, 1)]"
-		"[NumThreads(1, 1, 1)]"
-		"void BroadcastNode()"
-		"{"
-		"    Output.Store3(0, uint3(0x6C6C6548, 0x6F57206F, 0x00646C72));"
-		"}";
-
-	shader.CompileFromFile("Shader/Shader.shader");
 }
 
 ID3D12RootSignature* CreateGlobalRootSignature(CComPtr<ID3D12Device9> pDevice)
