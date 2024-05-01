@@ -29,19 +29,23 @@ THE SOFTWARE.
 #include <dxcapi.h>
 #include <dxgi1_6.h>
 
+#include "Source/Shader.h"
+
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 613; }
-extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = u8".\\D3D12\\"; }
+extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
 
 #define UAV_SIZE 1024
 
 ID3D12Device9* InitializeDirectX();
 void ShutdownDirectX();
 bool EnsureWorkGraphsSupported(CComPtr<ID3D12Device9> pDevice);
-ID3DBlob* CompileGWGLibrary();
+void CompileGWGLibrary();
 ID3D12RootSignature* CreateGlobalRootSignature(CComPtr<ID3D12Device9> pDevice);
-ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, CComPtr<ID3DBlob> pGwgLibrary);
+ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, const LearningWorkGraph::Shader& shader);
 D3D12_SET_PROGRAM_DESC PrepareWorkGraph(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12StateObject> pStateObject);
 bool DispatchWorkGraphAndReadResults(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, D3D12_SET_PROGRAM_DESC SetProgramDesc, char* pResult);
+
+LearningWorkGraph::Shader shader;
 
 int main()
 {
@@ -50,11 +54,11 @@ int main()
 		CComPtr<ID3D12Device9> pDevice = InitializeDirectX();
 		if (EnsureWorkGraphsSupported(pDevice))
 		{
-			CComPtr<ID3DBlob> pGwgLibrary = CompileGWGLibrary();
+			CompileGWGLibrary();
 
 			CComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature(pDevice);
 
-			CComPtr<ID3D12StateObject> pStateObject = CreateGWGStateObject(pDevice, pGlobalRootSignature, pGwgLibrary);
+			CComPtr<ID3D12StateObject> pStateObject = CreateGWGStateObject(pDevice, pGlobalRootSignature, shader);
 			D3D12_SET_PROGRAM_DESC SetProgramDesc = PrepareWorkGraph(pDevice, pStateObject);
 
 			char result[UAV_SIZE / sizeof(char)];
@@ -75,7 +79,6 @@ int main()
 #define ERROR_QUIT(value, ...) if(!(value)) { printf("ERROR: "); printf(__VA_ARGS__); printf("\nPress any key to terminate...\n"); _getch(); throw 0; }
 
 
-static HMODULE sDxCompilerDLL = nullptr;
 static const wchar_t* kProgramName = L"Hello World";
 
 // function GetHardwareAdapter() copy-pasted from the publicly distributed sample provided at: https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-d3d12createdevice
@@ -114,19 +117,12 @@ ID3D12Device9* InitializeDirectX()
 		D3D12CreateDevice(hardwareAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&pDevice));
 	}
 
-	sDxCompilerDLL = LoadLibrary(L"dxcompiler.dll");
-
-	ERROR_QUIT(pDevice && sDxCompilerDLL, "Failed to initialize compiler.");
+	ERROR_QUIT(pDevice, "Failed to initialize compiler.");
 	return pDevice;
 }
 
 void ShutdownDirectX()
 {
-	if (sDxCompilerDLL)
-	{
-		FreeLibrary(sDxCompilerDLL);
-		sDxCompilerDLL = nullptr;
-	}
 	// most entities are automatically cleaned up courtesy of CComPtr
 }
 
@@ -140,7 +136,7 @@ bool EnsureWorkGraphsSupported(CComPtr<ID3D12Device9> pDevice)
 	return (Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED);
 }
 
-ID3DBlob* CompileGWGLibrary()
+void CompileGWGLibrary()
 {
 	static const char kSourceCode[] =
 		"RWByteAddressBuffer Output : register(u0);"
@@ -154,39 +150,7 @@ ID3DBlob* CompileGWGLibrary()
 		"    Output.Store3(0, uint3(0x6C6C6548, 0x6F57206F, 0x00646C72));"
 		"}";
 
-	ID3DBlob* pGwgLibrary = nullptr;
-	if (sDxCompilerDLL)
-	{
-		DxcCreateInstanceProc pDxcCreateInstance;
-		pDxcCreateInstance = (DxcCreateInstanceProc)GetProcAddress(sDxCompilerDLL, "DxcCreateInstance");
-
-		if (pDxcCreateInstance)
-		{
-			CComPtr<IDxcUtils> pUtils;
-			CComPtr<IDxcCompiler> pCompiler;
-			CComPtr<IDxcBlobEncoding> pSource;
-			CComPtr<IDxcOperationResult> pOperationResult;
-
-			if (SUCCEEDED(pDxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils))) && SUCCEEDED(pDxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&pCompiler))))
-			{
-				if (SUCCEEDED(pUtils->CreateBlob(kSourceCode, sizeof(kSourceCode), 0, &pSource)))
-				{
-					if (SUCCEEDED(pCompiler->Compile(pSource, nullptr, nullptr, L"lib_6_8", nullptr, 0, nullptr, 0, nullptr, &pOperationResult)))
-					{
-						HRESULT hr;
-						pOperationResult->GetStatus(&hr);
-						if (SUCCEEDED(hr))
-						{
-							pOperationResult->GetResult((IDxcBlob**)&pGwgLibrary);
-						}
-					}
-				}
-			}
-		}
-	}
-
-	ERROR_QUIT(pGwgLibrary, "Failed to compile GWG Library.");
-	return pGwgLibrary;
+	shader.Compile(kSourceCode);
 }
 
 ID3D12RootSignature* CreateGlobalRootSignature(CComPtr<ID3D12Device9> pDevice)
@@ -209,7 +173,7 @@ ID3D12RootSignature* CreateGlobalRootSignature(CComPtr<ID3D12Device9> pDevice)
 	return pRootSignature;
 }
 
-ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, CComPtr<ID3DBlob> pGwgLibrary)
+ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, const LearningWorkGraph::Shader& shader)
 {
 	ID3D12StateObject* pStateObject = nullptr;
 	CD3DX12_STATE_OBJECT_DESC Desc(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
@@ -218,7 +182,7 @@ ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<
 	pGlobalRootSignatureDesc->SetRootSignature(pGlobalRootSignature);
 
 	CD3DX12_DXIL_LIBRARY_SUBOBJECT* LibraryDesc = Desc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
-	CD3DX12_SHADER_BYTECODE gwgLibraryCode(pGwgLibrary);
+	CD3DX12_SHADER_BYTECODE gwgLibraryCode(shader.GetData(), shader.GetSize());
 	LibraryDesc->SetDXILLibrary(&gwgLibraryCode);
 
 	CD3DX12_WORK_GRAPH_SUBOBJECT* WorkGraphDesc = Desc.CreateSubobject<CD3DX12_WORK_GRAPH_SUBOBJECT>();
