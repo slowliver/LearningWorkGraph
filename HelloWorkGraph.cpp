@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <dxcapi.h>
 #include <dxgi1_6.h>
 
+#include "Source/Framework.h"
 #include "Source/Shader.h"
 
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 613; }
@@ -48,27 +49,26 @@ LearningWorkGraph::Shader shader;
 
 int main()
 {
-	try
+	CComPtr<ID3D12Device9> pDevice = InitializeDirectX();
+
+	if (!EnsureWorkGraphsSupported(pDevice))
 	{
-		CComPtr<ID3D12Device9> pDevice = InitializeDirectX();
-		if (EnsureWorkGraphsSupported(pDevice))
-		{
-			shader.CompileFromFile("Shader/Shader.shader");
-
-			CComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature(pDevice);
-
-			CComPtr<ID3D12StateObject> pStateObject = CreateGWGStateObject(pDevice, pGlobalRootSignature, shader);
-			D3D12_SET_PROGRAM_DESC SetProgramDesc = PrepareWorkGraph(pDevice, pStateObject);
-
-			char result[UAV_SIZE / sizeof(char)];
-			if (DispatchWorkGraphAndReadResults(pDevice, pGlobalRootSignature, SetProgramDesc, result))
-			{
-				printf("SUCCESS: Output was \"%s\"\nPress any key to terminate...\n", result);
-				_getch();
-			}
-		}
+		return -1;
 	}
-	catch (...)	{ }
+
+	shader.CompileFromFile("Shader/Shader.shader");
+
+	CComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature(pDevice);
+
+	CComPtr<ID3D12StateObject> pStateObject = CreateGWGStateObject(pDevice, pGlobalRootSignature, shader);
+	D3D12_SET_PROGRAM_DESC SetProgramDesc = PrepareWorkGraph(pDevice, pStateObject);
+
+	char result[UAV_SIZE / sizeof(char)];
+	if (DispatchWorkGraphAndReadResults(pDevice, pGlobalRootSignature, SetProgramDesc, result))
+	{
+		printf("SUCCESS: Output was \"%s\"\nPress any key to terminate...\n", result);
+		_getch();
+	}
 	
 	ShutdownDirectX();
 	return 0;
@@ -116,7 +116,7 @@ ID3D12Device9* InitializeDirectX()
 		D3D12CreateDevice(hardwareAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&pDevice));
 	}
 
-	ERROR_QUIT(pDevice, "Failed to initialize compiler.");
+	LWG_CHECK_WITH_MESSAGE(pDevice, "Failed to initialize compiler.");
 	return pDevice;
 }
 
@@ -129,7 +129,7 @@ bool EnsureWorkGraphsSupported(CComPtr<ID3D12Device9> pDevice)
 {
 	D3D12_FEATURE_DATA_D3D12_OPTIONS21 Options = {};
 	pDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS21, &Options, sizeof(Options));
-	ERROR_QUIT(Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED,
+	LWG_CHECK_WITH_MESSAGE(Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED,
 		"Failed to ensure work graphs were supported. Check driver and graphics card.");
 
 	return (Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED);
