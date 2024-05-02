@@ -45,8 +45,6 @@ ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<
 D3D12_SET_PROGRAM_DESC PrepareWorkGraph(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12StateObject> pStateObject);
 bool DispatchWorkGraphAndReadResults(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, D3D12_SET_PROGRAM_DESC SetProgramDesc, char* pResult);
 
-LearningWorkGraph::Shader shader;
-
 int main()
 {
 	CComPtr<ID3D12Device9> pDevice = InitializeDirectX();
@@ -56,6 +54,7 @@ int main()
 		return -1;
 	}
 
+	LearningWorkGraph::Shader shader;
 	shader.CompileFromFile("Shader/Shader.shader");
 
 	CComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature(pDevice);
@@ -157,24 +156,27 @@ ID3D12RootSignature* CreateGlobalRootSignature(CComPtr<ID3D12Device9> pDevice)
 
 ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, const LearningWorkGraph::Shader& shader)
 {
-	ID3D12StateObject* pStateObject = nullptr;
-	CD3DX12_STATE_OBJECT_DESC Desc(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
+	ID3D12StateObject* d3d12StateObject = nullptr;
 
-	CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT* pGlobalRootSignatureDesc = Desc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
-	pGlobalRootSignatureDesc->SetRootSignature(pGlobalRootSignature);
+	auto desc = CD3DX12_STATE_OBJECT_DESC(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
 
-	CD3DX12_DXIL_LIBRARY_SUBOBJECT* LibraryDesc = Desc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
-	CD3DX12_SHADER_BYTECODE gwgLibraryCode(shader.GetData(), shader.GetSize());
-	LibraryDesc->SetDXILLibrary(&gwgLibraryCode);
+	CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT* globalRootSignatureDesc = desc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+	globalRootSignatureDesc->SetRootSignature(pGlobalRootSignature);
 
-	CD3DX12_WORK_GRAPH_SUBOBJECT* WorkGraphDesc = Desc.CreateSubobject<CD3DX12_WORK_GRAPH_SUBOBJECT>();
-	WorkGraphDesc->IncludeAllAvailableNodes();
-	WorkGraphDesc->SetProgramName(kProgramName);
+	// シェーダライブラリを設定.
+	CD3DX12_DXIL_LIBRARY_SUBOBJECT* libraryDesc = desc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+	CD3DX12_SHADER_BYTECODE libraryCode(shader.GetData(), shader.GetSize());
+	libraryDesc->SetDXILLibrary(&libraryCode);
 
-	HRESULT hr = pDevice->CreateStateObject(Desc, IID_PPV_ARGS(&pStateObject));
-	ERROR_QUIT(SUCCEEDED(hr) && pStateObject, "Failed to create Work Graph State Object.");
+	// ワークグラフのセットアップ.
+	CD3DX12_WORK_GRAPH_SUBOBJECT* workGraphDesc = desc.CreateSubobject<CD3DX12_WORK_GRAPH_SUBOBJECT>();
+	workGraphDesc->IncludeAllAvailableNodes();		// すべての利用可能なノードを使用する.
+	workGraphDesc->SetProgramName(kProgramName);
 
-	return pStateObject;
+	HRESULT hr = pDevice->CreateStateObject(desc, IID_PPV_ARGS(&d3d12StateObject));
+	LWG_CHECK_WITH_MESSAGE(SUCCEEDED(hr) && d3d12StateObject, "Failed to create Work Graph State Object.");
+
+	return d3d12StateObject;
 }
 
 inline ID3D12Resource* AllocateBuffer(CComPtr<ID3D12Device9> pDevice, UINT64 Size, D3D12_RESOURCE_FLAGS ResourceFlags, D3D12_HEAP_TYPE HeapType)
