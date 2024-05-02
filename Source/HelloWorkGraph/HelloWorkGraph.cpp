@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include <d3d12sdklayers.h>
 #include <dxgidebug.h>
 #endif
+#include <math.h>
 
 #include <Framework/Application.h>
 #include <Framework/Framework.h>
@@ -47,6 +48,12 @@ using Microsoft::WRL::ComPtr;
 
 class HelloWorkGraphApplication : public LearningWorkGraph::Application
 {
+private:
+	struct Vertex
+	{
+		float m_position[2] = {};
+	};
+
 public:
 	virtual void OnInitialize() override;
 	virtual void OnUpdate() override {}
@@ -62,10 +69,14 @@ private:
 	bool DispatchWorkGraphAndReadResults(ComPtr<ID3D12RootSignature> pGlobalRootSignature, D3D12_SET_PROGRAM_DESC SetProgramDesc, char* pResult);
 
 private:
+	static constexpr uint32_t k_circle = 64;
 	static constexpr const wchar_t* k_programName = L"Hello World";
 	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 	ComPtr<ID3D12PipelineState> m_pipelineState = nullptr;
-
+	ComPtr<ID3D12Resource> m_vertexBuffer = nullptr;
+	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView = {};
+	ComPtr<ID3D12Resource> m_indexBuffer = nullptr;
+	D3D12_INDEX_BUFFER_VIEW m_indexBufferView = {};
 };
 
 void HelloWorkGraphApplication::OnInitialize()
@@ -102,24 +113,105 @@ void HelloWorkGraphApplication::OnInitialize()
 	}
 
 
+	{
+		// Define the geometry for a triangle.
+		auto vertices = std::vector<Vertex>();
+		Vertex v0 = {};
+		v0.m_position[0] = 0.0f;
+		v0.m_position[1] = 0.0f;
+		vertices.emplace_back(v0);
+		for (uint32_t i = 0; i < k_circle; ++i)
+		{
+			const float theta = ((float)i / k_circle) * 2.0f * 3.14159265358979323846f;
+			Vertex v = {};
+			v.m_position[0] = sinf(theta);
+			v.m_position[1] = cosf(theta);
+			vertices.emplace_back(v);
+		}
+#if 0
+		Vertex vertices[] =
+		{
+			{ 0.0f, 0.0f },
+			{ 0.0f, 1.0f },
+			{ 1.0f, 1.0f },
+		};
+#endif
+		// Note: using upload heaps to transfer static data like vert buffers is not 
+		// recommended. Every time the GPU needs it, the upload heap will be marshalled 
+		// over. Please read up on Default Heap usage. An upload heap is used here for 
+		// code simplicity and because there are very few verts to actually transfer.
+		auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+		auto buffer = CD3DX12_RESOURCE_DESC::Buffer(sizeof(Vertex) * vertices.size());
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommittedResource(
+			&heapProperties,
+			D3D12_HEAP_FLAG_NONE,
+			&buffer,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&m_vertexBuffer))));
+
+		// Copy the triangle data to the vertex buffer.
+		{
+			UINT8* pVertexDataBegin;
+			CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
+			LWG_CHECK(SUCCEEDED(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin))));
+			memcpy(pVertexDataBegin, vertices.data(), sizeof(Vertex) * vertices.size());
+			m_vertexBuffer->Unmap(0, nullptr);
+		}
+
+		// Initialize the vertex buffer view.
+		m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
+		m_vertexBufferView.StrideInBytes = sizeof(Vertex);
+		m_vertexBufferView.SizeInBytes = sizeof(Vertex) * vertices.size();
+
+		auto indices = std::vector<uint16_t>();
+		for (uint32_t i = 0; i < k_circle; ++i)
+		{
+			indices.emplace_back(0);
+			indices.emplace_back(i + 1);
+			indices.emplace_back((i != k_circle - 1) ? (i + 2) : 1);
+		}
+		auto indexBuffer = CD3DX12_RESOURCE_DESC::Buffer(sizeof(uint16_t) * indices.size());
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommittedResource(
+			&heapProperties,
+			D3D12_HEAP_FLAG_NONE,
+			&indexBuffer,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&m_indexBuffer))));
+
+		{
+			UINT8* indexDataBegin;
+			CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
+			LWG_CHECK(SUCCEEDED(m_indexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&indexDataBegin))));
+			memcpy(indexDataBegin, indices.data(), sizeof(uint16_t) * indices.size());
+			m_indexBuffer->Unmap(0, nullptr);
+		}
+
+		m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
+		m_indexBufferView.SizeInBytes = sizeof(uint16_t) * indices.size();
+		m_indexBufferView.Format = DXGI_FORMAT_R16_UINT;
+	}
+
 	// Define the vertex input layout.
 	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
 	{
-		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+		{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+//		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
 
 	auto vertexShader = LearningWorkGraph::Shader();
 	vertexShader.CompileFromFile("Shader/Shader.shader", "VSMain", "vs_6_5");
+
+	auto pixelShader = LearningWorkGraph::Shader();
+	pixelShader.CompileFromFile("Shader/Shader.shader", "PSMain", "ps_6_5");
 
 	// Describe and create the graphics pipeline state object (PSO).
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
 	psoDesc.pRootSignature = m_rootSignature.Get();
 	psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.GetData(), vertexShader.GetSize());
-#if 0
-	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-#endif
+	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.GetData(), pixelShader.GetSize());
 	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 	psoDesc.DepthStencilState.DepthEnable = FALSE;
@@ -367,11 +459,10 @@ void HelloWorkGraphApplication::OnRender()
 		// Record commands.
 		const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 		m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-#if 0
 		m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-		m_commandList->DrawInstanced(3, 1, 0, 0);
-#endif
+		m_commandList->IASetIndexBuffer(&m_indexBufferView);
+		m_commandList->DrawIndexedInstanced(3 * k_circle, 1, 0, 0, 0);
 
 		// Indicate that the back buffer will now be used to present.
 		barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
