@@ -1,10 +1,11 @@
 ﻿#include <Framework/Framework.h>
+#include <Framework/Application.h>
 
 #include <Windows.h>
 
 static LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	std::nullptr_t application = nullptr;// reinterpret_cast<LearningWorkGraph::Application*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+	auto* application = LearningWorkGraph::Application::GetMainApplication();
 
 	switch (message)
 	{
@@ -33,8 +34,8 @@ static LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_PAINT:
 		if (application)
 		{
-			//			application->OnUpdate();
-			//			application->OnRender();
+			application->OnUpdate();
+			application->OnRender();
 		}
 		return 0;
 

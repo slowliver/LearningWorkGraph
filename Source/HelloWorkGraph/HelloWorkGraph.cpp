@@ -49,6 +49,8 @@ class HelloWorkGraphApplication : public LearningWorkGraph::Application
 {
 public:
 	virtual void OnInitialize() override;
+	virtual void OnUpdate() override {}
+	virtual void OnRender() override {}
 
 private:
 	bool EnsureWorkGraphsSupported();

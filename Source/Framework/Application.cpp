@@ -6,6 +6,20 @@
 using Microsoft::WRL::ComPtr;
 namespace LearningWorkGraph
 {
+Application* Application::s_instance = nullptr;
+
+Application::Application()
+{
+	LWG_CHECK(!s_instance);
+	s_instance = this;
+}
+
+Application::~Application()
+{
+	LWG_CHECK(s_instance == this);
+	s_instance = nullptr;
+}
+
 void Application::Initialize(const Framework* framework)
 {
 	LWG_CHECK(framework);
