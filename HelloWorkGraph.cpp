@@ -28,6 +28,11 @@ THE SOFTWARE.
 #include <d3dx12/d3dx12.h>
 #include <dxcapi.h>
 #include <dxgi1_6.h>
+#include <wrl.h>
+#if defined(_DEBUG)
+#include <d3d12sdklayers.h>
+#include <dxgidebug.h>
+#endif
 
 #include "Source/Framework.h"
 #include "Source/Shader.h"
@@ -37,92 +42,286 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 
 #define UAV_SIZE 1024
 
-ID3D12Device9* InitializeDirectX();
-void ShutdownDirectX();
 bool EnsureWorkGraphsSupported(CComPtr<ID3D12Device9> pDevice);
 ID3D12RootSignature* CreateGlobalRootSignature(CComPtr<ID3D12Device9> pDevice);
 ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, const LearningWorkGraph::Shader& shader);
 D3D12_SET_PROGRAM_DESC PrepareWorkGraph(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12StateObject> pStateObject);
 bool DispatchWorkGraphAndReadResults(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, D3D12_SET_PROGRAM_DESC SetProgramDesc, char* pResult);
 
+using Microsoft::WRL::ComPtr;
+
+extern "C" const GUID DXGI_DEBUG_D3D12;
+namespace LearningWorkGraph
+{
+class Application
+{
+public:
+	Application() {}
+
+	void Initialize();
+	void Terminate();
+
+	ID3D12Device9* GetD3D12Device9() { return m_d3d12Device.Get(); }
+
+	static LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+private:
+	static constexpr uint32_t k_frameCount = 2;
+	HWND m_hwnd = {};
+	ComPtr<ID3D12Device9> m_d3d12Device = nullptr;
+	ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue = nullptr;
+
+};
+
+LRESULT Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	auto* application = reinterpret_cast<Application*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+
+	switch (message)
+	{
+	case WM_CREATE:
+	{
+		// Save the DXSample* passed in to CreateWindow.
+		LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
+		SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
+	}
+	return 0;
+
+	case WM_KEYDOWN:
+		if (application)
+		{
+//			pSample->OnKeyDown(static_cast<UINT8>(wParam));
+		}
+		return 0;
+
+	case WM_KEYUP:
+		if (application)
+		{
+//			pSample->OnKeyUp(static_cast<UINT8>(wParam));
+		}
+		return 0;
+
+	case WM_PAINT:
+		if (application)
+		{
+//			application->OnUpdate();
+//			application->OnRender();
+		}
+		return 0;
+
+	case WM_DESTROY:
+		PostQuitMessage(0);
+		return 0;
+	}
+
+	// Handle any messages the switch statement didn't.
+	return DefWindowProc(hWnd, message, wParam, lParam);
+}
+
+void Application::Initialize()
+{
+#if 0
+	// Parse the command line parameters
+	int argc;
+	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	pSample->ParseCommandLineArgs(argv, argc);
+	LocalFree(argv);
+#endif
+
+	uint32_t windowSize[2] = { 1280, 720 };
+	auto instance = GetModuleHandleA(NULL);
+
+	// Initialize the window class.
+	WNDCLASSEX windowClass = { 0 };
+	windowClass.cbSize = sizeof(WNDCLASSEX);
+	windowClass.style = CS_HREDRAW | CS_VREDRAW;
+	windowClass.lpfnWndProc = Application::WindowProc;
+	windowClass.hInstance = instance;
+	windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
+	windowClass.lpszClassName = L"DXSampleClass";
+	RegisterClassEx(&windowClass);
+
+	RECT windowRect = { 0, 0, windowSize[0], windowSize[1] };
+	AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+
+	// Create the window and store a handle to it.
+	m_hwnd = CreateWindow(
+		windowClass.lpszClassName,
+		L"Test",
+		WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT,
+		CW_USEDEFAULT,
+		windowRect.right - windowRect.left,
+		windowRect.bottom - windowRect.top,
+		nullptr,        // We have no parent window.
+		nullptr,        // We aren't using menus.
+		instance,
+		NULL);
+
+	ShowWindow(m_hwnd, SW_SHOW);
+
+#if 0
+	// Main sample loop.
+	MSG msg = {};
+	while (msg.message != WM_QUIT)
+	{
+		// Process any messages in the queue.
+		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+	}
+#endif
+
+	UINT dxgiFactoryFlags = 0;
+
+#if defined(_DEBUG)
+	// Enable the debug layer (requires the Graphics Tools "optional feature").
+	// NOTE: Enabling the debug layer after device creation will invalidate the active device.
+	{
+		ComPtr<ID3D12Debug> debugController = nullptr;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+		{
+			debugController->EnableDebugLayer();
+
+			// Enable additional debug layers.
+			dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+		}
+	}
+#endif
+
+	ComPtr<IDXGIFactory4> dxgiFactory4 = nullptr;
+	if (SUCCEEDED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&dxgiFactory4))))
+	{
+		ComPtr<IDXGIAdapter1> hardwareAdapter;
+		// function GetHardwareAdapter() copy-pasted from the publicly distributed sample provided at: https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-d3d12createdevice
+		for (UINT adapterIndex = 0; ; ++adapterIndex)
+		{
+			IDXGIAdapter1* adapter = nullptr;
+			if (DXGI_ERROR_NOT_FOUND == dxgiFactory4->EnumAdapters1(adapterIndex, &adapter))
+			{
+				// No more adapters to enumerate.
+				break;
+			}
+
+			// Check to see if the adapter supports Direct3D 12, but don't create the actual device yet.
+			if (SUCCEEDED(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
+			{
+				hardwareAdapter = adapter;
+				break;
+			}
+			adapter->Release();
+		}
+		D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_d3d12Device));
+	}
+
+	LWG_CHECK_WITH_MESSAGE(m_d3d12Device, "Failed to initialize compiler.");
+
+	// Describe and create the command queue.
+	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+
+	LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_d3d12CommandQueue))));
+
+	// Describe and create the swap chain.
+	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+	swapChainDesc.BufferCount = k_frameCount;
+	swapChainDesc.Width = 1280;
+	swapChainDesc.Height = 720;
+	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	swapChainDesc.SampleDesc.Count = 1;
+
+#if 0
+	ComPtr<IDXGISwapChain1> swapChain;
+	ThrowIfFailed(factory->CreateSwapChainForHwnd(
+		m_commandQueue.Get(),        // Swap chain needs the queue so that it can force a flush on it.
+		Win32Application::GetHwnd(),
+		&swapChainDesc,
+		nullptr,
+		nullptr,
+		&swapChain
+	));
+
+	// This sample does not support fullscreen transitions.
+	ThrowIfFailed(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER));
+
+	ThrowIfFailed(swapChain.As(&m_swapChain));
+	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+#endif
+}
+
+void Application::Terminate()
+{
+	HRESULT hr = {};
+
+#if defined(_DEBUG) && 0
+	ComPtr<IDXGIDebug> dxgiDebug = nullptr;
+
+	typedef HRESULT(WINAPI* DXGIGetDebugInterfaceCallback)(const IID&, void**);
+	if (auto dll = GetModuleHandleA("dxgidebug.dll"))
+	{
+		if (auto* dxgiGetDebugInterface = (DXGIGetDebugInterfaceCallback)GetProcAddress(dll, "DXGIGetDebugInterface"))
+		{
+			hr = dxgiGetDebugInterface(IID_PPV_ARGS(&dxgiDebug));
+			if (SUCCEEDED(hr))
+			{
+				dxgiDebug->ReportLiveObjects(DXGI_DEBUG_D3D12, DXGI_DEBUG_RLO_DETAIL);
+			}
+		}
+	}
+#endif
+}
+}
+
 int main()
 {
-	CComPtr<ID3D12Device9> pDevice = InitializeDirectX();
+	auto application = LearningWorkGraph::Application();
+	application.Initialize();
 
-	if (!EnsureWorkGraphsSupported(pDevice))
+	auto* d3d12Device9 = application.GetD3D12Device9();
+
+	if (!EnsureWorkGraphsSupported(d3d12Device9))
 	{
 		return -1;
 	}
 
-	LearningWorkGraph::Shader shader;
+	auto shader = LearningWorkGraph::Shader();
 	shader.CompileFromFile("Shader/Shader.shader");
 
-	CComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature(pDevice);
+	CComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature(d3d12Device9);
 
-	CComPtr<ID3D12StateObject> pStateObject = CreateGWGStateObject(pDevice, pGlobalRootSignature, shader);
-	D3D12_SET_PROGRAM_DESC SetProgramDesc = PrepareWorkGraph(pDevice, pStateObject);
+	CComPtr<ID3D12StateObject> pStateObject = CreateGWGStateObject(d3d12Device9, pGlobalRootSignature, shader);
+	D3D12_SET_PROGRAM_DESC SetProgramDesc = PrepareWorkGraph(d3d12Device9, pStateObject);
 
 	char result[UAV_SIZE / sizeof(char)];
-	if (DispatchWorkGraphAndReadResults(pDevice, pGlobalRootSignature, SetProgramDesc, result))
+	if (DispatchWorkGraphAndReadResults(d3d12Device9, pGlobalRootSignature, SetProgramDesc, result))
 	{
-		printf("SUCCESS: Output was \"%s\"\nPress any key to terminate...\n", result);
-		_getch();
+		printf("SUCCESS: Output was \"%s\"\n", result);
+//		_getch();
+	}
+
+	// Main sample loop.
+	MSG msg = {};
+	while (msg.message != WM_QUIT)
+	{
+		// Process any messages in the queue.
+		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
 	}
 	
-	ShutdownDirectX();
 	return 0;
 }
 
-
 #define ERROR_QUIT(value, ...) if(!(value)) { printf("ERROR: "); printf(__VA_ARGS__); printf("\nPress any key to terminate...\n"); _getch(); throw 0; }
 
-
 static const wchar_t* kProgramName = L"Hello World";
-
-// function GetHardwareAdapter() copy-pasted from the publicly distributed sample provided at: https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-d3d12createdevice
-void GetHardwareAdapter(IDXGIFactory4* pFactory, IDXGIAdapter1** ppAdapter)
-{
-	*ppAdapter = nullptr;
-	for (UINT adapterIndex = 0; ; ++adapterIndex)
-	{
-		IDXGIAdapter1* pAdapter = nullptr;
-		if (DXGI_ERROR_NOT_FOUND == pFactory->EnumAdapters1(adapterIndex, &pAdapter))
-		{
-			// No more adapters to enumerate.
-			break;
-		}
-
-		// Check to see if the adapter supports Direct3D 12, but don't create the
-		// actual device yet.
-		if (SUCCEEDED(D3D12CreateDevice(pAdapter, D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
-		{
-			*ppAdapter = pAdapter;
-			return;
-		}
-		pAdapter->Release();
-	}
-}
-
-ID3D12Device9* InitializeDirectX()
-{
-	ID3D12Device9* pDevice = nullptr;
-
-	CComPtr<IDXGIFactory4> pFactory;
-	if (SUCCEEDED(CreateDXGIFactory2(0, IID_PPV_ARGS(&pFactory))))
-	{
-		CComPtr<IDXGIAdapter1> hardwareAdapter;
-		GetHardwareAdapter(pFactory, &hardwareAdapter);
-		D3D12CreateDevice(hardwareAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&pDevice));
-	}
-
-	LWG_CHECK_WITH_MESSAGE(pDevice, "Failed to initialize compiler.");
-	return pDevice;
-}
-
-void ShutdownDirectX()
-{
-	// most entities are automatically cleaned up courtesy of CComPtr
-}
 
 bool EnsureWorkGraphsSupported(CComPtr<ID3D12Device9> pDevice)
 {
@@ -200,15 +399,16 @@ D3D12_SET_PROGRAM_DESC PrepareWorkGraph(CComPtr<ID3D12Device9> pDevice, CComPtr<
 	pStateObjectProperties = pStateObject;
 	pWorkGraphProperties = pStateObject;
 
-	UINT WGIndex = pWorkGraphProperties->GetWorkGraphIndex(kProgramName);
+	// GPU ‚ÅŽg—p‚·‚éƒƒ‚ƒŠ‚ðŠm•Û.
+	UINT index = pWorkGraphProperties->GetWorkGraphIndex(kProgramName);
 	D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS MemoryRequirements = {};
-	pWorkGraphProperties->GetWorkGraphMemoryRequirements(WGIndex, &MemoryRequirements);
+	pWorkGraphProperties->GetWorkGraphMemoryRequirements(index, &MemoryRequirements);
 	if (MemoryRequirements.MaxSizeInBytes > 0)
 	{
 		pBackingMemoryResource = AllocateBuffer(pDevice, MemoryRequirements.MaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_HEAP_TYPE_DEFAULT);
 	}
 
-	UINT test = pWorkGraphProperties->GetNumEntrypoints(WGIndex);
+	UINT test = pWorkGraphProperties->GetNumEntrypoints(index);
 
 	D3D12_SET_PROGRAM_DESC Desc = {};
 	Desc.Type = D3D12_PROGRAM_TYPE_WORK_GRAPH;

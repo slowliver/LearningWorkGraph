@@ -5,7 +5,7 @@
 
 #include <windows.h>
 #include <dxcapi.h>
-#include <atlbase.h>
+#include <wrl.h>
 #include <d3dx12/d3dx12.h>
 
 //struct ID3DBlob;

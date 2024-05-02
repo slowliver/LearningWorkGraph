@@ -8,20 +8,21 @@
 #include <vector>
 #include <cstdio>
 
+using Microsoft::WRL::ComPtr;
+
 class DXCompiler
 {
 public:
 	DXCompiler();
 	~DXCompiler();
 
-	IDxcUtils* GetUtils() { return m_utils; }
-	IDxcCompiler* GetCompiler() { return m_compiler; }
-
+	IDxcUtils* GetUtils() { return m_utils.Get(); }
+	IDxcCompiler* GetCompiler() { return m_compiler.Get(); }
 
 private:
 	HMODULE m_dll = {};
-	CComPtr<IDxcUtils> m_utils = nullptr;
-	CComPtr<IDxcCompiler> m_compiler = nullptr;
+	ComPtr<IDxcUtils> m_utils = nullptr;
+	ComPtr<IDxcCompiler> m_compiler = nullptr;
 };
 
 DXCompiler::DXCompiler()
@@ -56,8 +57,8 @@ DXCompiler::DXCompiler()
 
 DXCompiler::~DXCompiler()
 {
-	m_compiler.Release();
-	m_utils.Release();
+	m_compiler.Reset();
+	m_utils.Reset();
 	if (m_dll)
 	{
 		FreeLibrary(m_dll);
@@ -78,12 +79,12 @@ bool Shader::CompileFromMemory(std::string_view source)
 {
 	Release();
 	auto utils = g_dxcompiler->GetUtils();
-	CComPtr<IDxcBlobEncoding> sourceBlob;
+	ComPtr<IDxcBlobEncoding> sourceBlob;
 	if (SUCCEEDED(utils->CreateBlob(source.data(), source.size(), 0, &sourceBlob)))
 	{
 		auto compiler = g_dxcompiler->GetCompiler();
-		CComPtr<IDxcOperationResult> result;
-		if (SUCCEEDED(compiler->Compile(sourceBlob, nullptr, nullptr, L"lib_6_8", nullptr, 0, nullptr, 0, nullptr, &result)))
+		ComPtr<IDxcOperationResult> result;
+		if (SUCCEEDED(compiler->Compile(sourceBlob.Get(), nullptr, nullptr, L"lib_6_8", nullptr, 0, nullptr, 0, nullptr, &result)))
 		{
 			HRESULT hr = {};
 			result->GetStatus(&hr);
