@@ -53,10 +53,16 @@ private:
 	{
 		float m_position[2] = {};
 	};
+	struct SceneParameters
+	{
+		float m_viewProjectionMatrix[4][4];
+		float m_padding[48]; // Padding so the constant buffer is 256-byte aligned.
+	};
+	static_assert(sizeof(SceneParameters) == 256);
 
 public:
 	virtual void OnInitialize() override;
-	virtual void OnUpdate() override {}
+	virtual void OnUpdate() override;
 	virtual void OnRender() override;
 
 private:
@@ -77,12 +83,19 @@ private:
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView = {};
 	ComPtr<ID3D12Resource> m_indexBuffer = nullptr;
 	D3D12_INDEX_BUFFER_VIEW m_indexBufferView = {};
+	
+	// Constant Buffer.
+	ComPtr<ID3D12DescriptorHeap> m_constantBufferViewHeap = nullptr;
+	SceneParameters m_sceneParameters = {};
+	ComPtr<ID3D12Resource> m_sceneParametersConstantBuffer = {};
+	std::byte* m_sceneParametersDataBegin = nullptr;
 };
 
 void HelloWorkGraphApplication::OnInitialize()
 {
 	auto* d3d12Device9 = GetD3D12Device9();
 
+#if 0
 	if (!EnsureWorkGraphsSupported())
 	{
 		return;
@@ -102,9 +115,27 @@ void HelloWorkGraphApplication::OnInitialize()
 		printf("SUCCESS: Output was \"%s\"\n", result);
 	}
 
+#endif
+
 	{
+		// Describe and create a constant buffer view (CBV) descriptor heap.
+// Flags indicate that this descriptor heap can be bound to the pipeline 
+// and that descriptors contained in it can be referenced by a root table.
+		D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
+		cbvHeapDesc.NumDescriptors = 1;
+		cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&m_constantBufferViewHeap))));
+	}
+
+	{
+		CD3DX12_DESCRIPTOR_RANGE ranges[1] = {};
+		CD3DX12_ROOT_PARAMETER rootParameters[1] = {};
+		ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0);
+		rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
+
 		CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-		rootSignatureDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+		rootSignatureDesc.Init(1, rootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 		ComPtr<ID3DBlob> signature = nullptr;
 		ComPtr<ID3DBlob> error = nullptr;
@@ -112,6 +143,29 @@ void HelloWorkGraphApplication::OnInitialize()
 		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature))));
 	}
 
+	// Create the constant buffer.
+	{
+		auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+		auto buffer = CD3DX12_RESOURCE_DESC::Buffer(sizeof(SceneParameters));
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommittedResource(
+			&heapProperties,
+			D3D12_HEAP_FLAG_NONE,
+			&buffer,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&m_sceneParametersConstantBuffer))));
+
+		// Describe and create a constant buffer view.
+		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+		cbvDesc.BufferLocation = m_sceneParametersConstantBuffer->GetGPUVirtualAddress();
+		cbvDesc.SizeInBytes = sizeof(SceneParameters);
+		m_d3d12Device->CreateConstantBufferView(&cbvDesc, m_constantBufferViewHeap->GetCPUDescriptorHandleForHeapStart());
+
+		// Map and initialize the constant buffer. We don't unmap this until the app closes. Keeping things mapped for the lifetime of the resource is okay.
+		CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
+		LWG_CHECK(SUCCEEDED(m_sceneParametersConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_sceneParametersDataBegin))));
+		memcpy(m_sceneParametersDataBegin, &m_sceneParameters, sizeof(m_sceneParameters));
+	}
 
 	{
 		// Define the geometry for a triangle.
@@ -411,6 +465,12 @@ bool HelloWorkGraphApplication::DispatchWorkGraphAndReadResults(ComPtr<ID3D12Roo
 	return false;
 }
 
+void HelloWorkGraphApplication::OnUpdate()
+{
+	m_sceneParameters.m_viewProjectionMatrix[0][0] += 0.001f;
+	memcpy(m_sceneParametersDataBegin, &m_sceneParameters, sizeof(m_sceneParameters));
+}
+
 void HelloWorkGraphApplication::OnRender()
 {
 	// Record all the commands we need to render the scene into the command list.
@@ -455,6 +515,10 @@ void HelloWorkGraphApplication::OnRender()
 
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_renderTargetViewHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_renderTargetViewDescriptorSize);
 		m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+		ID3D12DescriptorHeap* heaps[] = { m_constantBufferViewHeap.Get() };
+		m_commandList->SetDescriptorHeaps(1, heaps);
+		m_commandList->SetGraphicsRootDescriptorTable(0, m_constantBufferViewHeap->GetGPUDescriptorHandleForHeapStart());
 
 		// Record commands.
 		const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };

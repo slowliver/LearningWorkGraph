@@ -20,11 +20,18 @@ struct VSOutputToPSInput
 	float4 color : COLOR;
 };
 
+struct SceneParameters
+{
+	float4x4 viewProjectionMatrix;
+};
+ConstantBuffer<SceneParameters> sceneParameters : register(b0);
+
 VSOutputToPSInput VSMain(VSInput i)
 {
 	VSOutputToPSInput o = (VSOutputToPSInput)0;
 
 	o.position = float4(i.position, 0.0f, 1.0f);
+	o.position.x += sceneParameters.viewProjectionMatrix._m00;
 	o.color = float4(i.position, 0.0f, 1.0f);
 	
 	return o;
