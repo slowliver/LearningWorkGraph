@@ -48,6 +48,8 @@ ID3D12StateObject* CreateGWGStateObject(CComPtr<ID3D12Device9> pDevice, CComPtr<
 D3D12_SET_PROGRAM_DESC PrepareWorkGraph(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12StateObject> pStateObject);
 bool DispatchWorkGraphAndReadResults(CComPtr<ID3D12Device9> pDevice, CComPtr<ID3D12RootSignature> pGlobalRootSignature, D3D12_SET_PROGRAM_DESC SetProgramDesc, char* pResult);
 
+static HWND g_hwnd = {};
+
 using Microsoft::WRL::ComPtr;
 
 extern "C" const GUID DXGI_DEBUG_D3D12;
@@ -63,60 +65,27 @@ public:
 
 	ID3D12Device9* GetD3D12Device9() { return m_d3d12Device.Get(); }
 
-	static LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+private:
+	void WaitForGPU();
 
 private:
 	static constexpr uint32_t k_frameCount = 2;
-	HWND m_hwnd = {};
 	ComPtr<ID3D12Device9> m_d3d12Device = nullptr;
 	ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue = nullptr;
+	ComPtr<IDXGISwapChain3> m_dxgiSwapChain = nullptr;
+	ComPtr<ID3D12DescriptorHeap> m_renderTargetViewHeap = nullptr;
+	ComPtr<ID3D12CommandAllocator> m_commandAllocators[k_frameCount] = {};
+	ComPtr<ID3D12Resource> m_renderTargets[k_frameCount] = {};
+	ComPtr<ID3D12GraphicsCommandList> m_commandList;
 
+	// Fence Objects.
+	uint32_t m_frameIndex = 0;
+	HANDLE m_fenceEvent = {};
+	ComPtr<ID3D12Fence> m_fence = nullptr;
+	uint64_t m_fenceValues[k_frameCount] = {};
+
+	size_t m_renderTargetViewDescriptorSize = 0;
 };
-
-LRESULT Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	auto* application = reinterpret_cast<Application*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
-
-	switch (message)
-	{
-	case WM_CREATE:
-	{
-		// Save the DXSample* passed in to CreateWindow.
-		LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
-		SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
-	}
-	return 0;
-
-	case WM_KEYDOWN:
-		if (application)
-		{
-//			pSample->OnKeyDown(static_cast<UINT8>(wParam));
-		}
-		return 0;
-
-	case WM_KEYUP:
-		if (application)
-		{
-//			pSample->OnKeyUp(static_cast<UINT8>(wParam));
-		}
-		return 0;
-
-	case WM_PAINT:
-		if (application)
-		{
-//			application->OnUpdate();
-//			application->OnRender();
-		}
-		return 0;
-
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		return 0;
-	}
-
-	// Handle any messages the switch statement didn't.
-	return DefWindowProc(hWnd, message, wParam, lParam);
-}
 
 void Application::Initialize()
 {
@@ -128,37 +97,7 @@ void Application::Initialize()
 	LocalFree(argv);
 #endif
 
-	uint32_t windowSize[2] = { 1280, 720 };
-	auto instance = GetModuleHandleA(NULL);
 
-	// Initialize the window class.
-	WNDCLASSEX windowClass = { 0 };
-	windowClass.cbSize = sizeof(WNDCLASSEX);
-	windowClass.style = CS_HREDRAW | CS_VREDRAW;
-	windowClass.lpfnWndProc = Application::WindowProc;
-	windowClass.hInstance = instance;
-	windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
-	windowClass.lpszClassName = L"DXSampleClass";
-	RegisterClassEx(&windowClass);
-
-	RECT windowRect = { 0, 0, windowSize[0], windowSize[1] };
-	AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
-
-	// Create the window and store a handle to it.
-	m_hwnd = CreateWindow(
-		windowClass.lpszClassName,
-		L"Test",
-		WS_OVERLAPPEDWINDOW,
-		CW_USEDEFAULT,
-		CW_USEDEFAULT,
-		windowRect.right - windowRect.left,
-		windowRect.bottom - windowRect.top,
-		nullptr,        // We have no parent window.
-		nullptr,        // We aren't using menus.
-		instance,
-		NULL);
-
-	ShowWindow(m_hwnd, SW_SHOW);
 
 #if 0
 	// Main sample loop.
@@ -221,6 +160,9 @@ void Application::Initialize()
 	// Describe and create the command queue.
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+#if 0
+	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_DISABLE_GPU_TIMEOUT;
+#endif
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
 	LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_d3d12CommandQueue))));
@@ -235,23 +177,60 @@ void Application::Initialize()
 	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	swapChainDesc.SampleDesc.Count = 1;
 
-#if 0
-	ComPtr<IDXGISwapChain1> swapChain;
-	ThrowIfFailed(factory->CreateSwapChainForHwnd(
-		m_commandQueue.Get(),        // Swap chain needs the queue so that it can force a flush on it.
-		Win32Application::GetHwnd(),
-		&swapChainDesc,
-		nullptr,
-		nullptr,
-		&swapChain
-	));
+	ComPtr<IDXGISwapChain1> swapChain = nullptr;
+	LWG_CHECK(SUCCEEDED(dxgiFactory4->CreateSwapChainForHwnd(m_d3d12CommandQueue.Get(), g_hwnd, &swapChainDesc, nullptr, nullptr, &swapChain)));
 
 	// This sample does not support fullscreen transitions.
-	ThrowIfFailed(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER));
+	LWG_CHECK(SUCCEEDED(dxgiFactory4->MakeWindowAssociation(g_hwnd, DXGI_MWA_NO_ALT_ENTER)));
 
-	ThrowIfFailed(swapChain.As(&m_swapChain));
-	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-#endif
+	LWG_CHECK(SUCCEEDED(swapChain.As(&m_dxgiSwapChain)));
+	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
+
+	// Create descriptor heaps.
+	{
+		// Describe and create a render target view (RTV) descriptor heap.
+		D3D12_DESCRIPTOR_HEAP_DESC renderTargetViewHeapDesc = {};
+		renderTargetViewHeapDesc.NumDescriptors = k_frameCount;
+		renderTargetViewHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+		renderTargetViewHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateDescriptorHeap(&renderTargetViewHeapDesc, IID_PPV_ARGS(&m_renderTargetViewHeap))));
+		m_renderTargetViewDescriptorSize = m_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	}
+
+	// Create frame resources.
+	{
+		auto renderTargetViewHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_renderTargetViewHeap->GetCPUDescriptorHandleForHeapStart());
+
+		// Create a RTV and a command allocator for each frame.
+		for (UINT n = 0; n < k_frameCount; n++)
+		{
+			LWG_CHECK(SUCCEEDED(m_dxgiSwapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n]))));
+			m_d3d12Device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, renderTargetViewHandle);
+			renderTargetViewHandle.Offset(1, m_renderTargetViewDescriptorSize);
+			LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n]))));
+		}
+	}
+
+	LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), NULL, IID_PPV_ARGS(&m_commandList))));
+	LWG_CHECK(SUCCEEDED(m_commandList->Close()));
+
+	// Create synchronization objects and wait until assets have been uploaded to the GPU.
+	{
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence))));
+		m_fenceValues[m_frameIndex]++;
+
+		// Create an event handle to use for frame synchronization.
+		m_fenceEvent = CreateEventA(nullptr, FALSE, FALSE, "Fence Event");
+		if (m_fenceEvent == nullptr)
+		{
+			LWG_CHECK(SUCCEEDED(HRESULT_FROM_WIN32(GetLastError())));
+		}
+
+		// Wait for the command list to execute; we are reusing the same command 
+		// list in our main loop but for now, we just want to wait for setup to 
+		// complete before continuing.
+		WaitForGPU();
+	}
 }
 
 void Application::Terminate()
@@ -275,10 +254,101 @@ void Application::Terminate()
 	}
 #endif
 }
+
+// Wait for pending GPU work to complete.
+void Application::WaitForGPU()
+{
+	// Schedule a Signal command in the queue.
+	LWG_CHECK(SUCCEEDED(m_d3d12CommandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex])));
+
+	// Wait until the fence has been processed.
+	LWG_CHECK(SUCCEEDED(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent)));
+	WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+
+	// Increment the fence value for the current frame.
+	++m_fenceValues[m_frameIndex];
+}
+}
+
+static LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	auto* application = reinterpret_cast<LearningWorkGraph::Application*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+
+	switch (message)
+	{
+	case WM_CREATE:
+	{
+		// Save the DXSample* passed in to CreateWindow.
+		LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
+		SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
+	}
+	return 0;
+
+	case WM_KEYDOWN:
+		if (application)
+		{
+			//			pSample->OnKeyDown(static_cast<UINT8>(wParam));
+		}
+		return 0;
+
+	case WM_KEYUP:
+		if (application)
+		{
+			//			pSample->OnKeyUp(static_cast<UINT8>(wParam));
+		}
+		return 0;
+
+	case WM_PAINT:
+		if (application)
+		{
+			//			application->OnUpdate();
+			//			application->OnRender();
+		}
+		return 0;
+
+	case WM_DESTROY:
+		PostQuitMessage(0);
+		return 0;
+	}
+
+	// Handle any messages the switch statement didn't.
+	return DefWindowProc(hWnd, message, wParam, lParam);
 }
 
 int main()
 {
+	uint32_t windowSize[2] = { 1280, 720 };
+	auto instance = GetModuleHandleA(NULL);
+
+	// Initialize the window class.
+	WNDCLASSEX windowClass = { 0 };
+	windowClass.cbSize = sizeof(WNDCLASSEX);
+	windowClass.style = CS_HREDRAW | CS_VREDRAW;
+	windowClass.lpfnWndProc = WindowProc;
+	windowClass.hInstance = instance;
+	windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
+	windowClass.lpszClassName = L"DXSampleClass";
+	RegisterClassEx(&windowClass);
+
+	RECT windowRect = { 0, 0, windowSize[0], windowSize[1] };
+	AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+
+	// Create the window and store a handle to it.
+	g_hwnd = CreateWindow(
+		windowClass.lpszClassName,
+		L"Test",
+		WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT,
+		CW_USEDEFAULT,
+		windowRect.right - windowRect.left,
+		windowRect.bottom - windowRect.top,
+		nullptr,        // We have no parent window.
+		nullptr,        // We aren't using menus.
+		instance,
+		NULL);
+
+	ShowWindow(g_hwnd, SW_SHOW);
+
 	auto application = LearningWorkGraph::Application();
 	application.Initialize();
 
