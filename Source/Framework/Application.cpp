@@ -151,6 +151,11 @@ void Application::Terminate()
 {
 	HRESULT hr = {};
 
+	// Ensure that the GPU is no longer referencing resources that are about to be cleaned up by the destructor.
+	WaitForGPU();
+
+	CloseHandle(m_fenceEvent);
+
 #if defined(_DEBUG) && 0
 	ComPtr<IDXGIDebug> dxgiDebug = nullptr;
 
@@ -167,6 +172,23 @@ void Application::Terminate()
 		}
 	}
 #endif
+}
+
+void Application::Present()
+{
+#if 0
+	// Record all the commands we need to render the scene into the command list.
+	PopulateCommandList();
+
+	// Execute the command list.
+	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+#endif
+
+	// Present the frame.
+	LWG_CHECK(SUCCEEDED(m_dxgiSwapChain->Present(1, 0)));
+
+	MoveToNextFrame();
 }
 
 // Wait for pending GPU work to complete.

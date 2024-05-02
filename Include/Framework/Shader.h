@@ -15,8 +15,8 @@ class Shader
 {
 public:
 	~Shader();
-	bool CompileFromMemory(std::string_view source);
-	bool CompileFromFile(std::string_view filePath);
+	bool CompileFromMemory(std::string_view source, std::string_view entryPoint, std::string_view target);
+	bool CompileFromFile(std::string_view filePath, std::string_view entryPoint, std::string_view target);
 //	void Map(const char* sourcePath);
 
 	const void* GetData() const { return m_compilerBufferData.get(); }

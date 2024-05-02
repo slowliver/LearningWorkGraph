@@ -72,7 +72,7 @@ Shader::~Shader()
 	Release();
 }
 
-bool Shader::CompileFromMemory(std::string_view source)
+bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPoint, std::string_view target)
 {
 	Release();
 	auto utils = g_dxcompiler->GetUtils();
@@ -81,7 +81,16 @@ bool Shader::CompileFromMemory(std::string_view source)
 	{
 		auto compiler = g_dxcompiler->GetCompiler();
 		ComPtr<IDxcOperationResult> result;
-		if (SUCCEEDED(compiler->Compile(sourceBlob.Get(), nullptr, nullptr, L"lib_6_8", nullptr, 0, nullptr, 0, nullptr, &result)))
+
+		auto wEntryPointSize = MultiByteToWideChar(CP_ACP, 0, entryPoint.data(), -1, NULL, 0);
+		auto wEntryPoint = std::unique_ptr<wchar_t[]>(new wchar_t[wEntryPointSize]);
+		MultiByteToWideChar(CP_ACP, 0, entryPoint.data(), -1, wEntryPoint.get(), wEntryPointSize);
+
+		auto wTargetSize = MultiByteToWideChar(CP_ACP, 0, target.data(), -1, NULL, 0);
+		auto wTarget = std::unique_ptr<wchar_t[]>(new wchar_t[wTargetSize]);
+		MultiByteToWideChar(CP_ACP, 0, target.data(), -1, wTarget.get(), wTargetSize);
+
+		if (SUCCEEDED(compiler->Compile(sourceBlob.Get(), nullptr, wEntryPoint.get(), wTarget.get(), nullptr, 0, nullptr, 0, nullptr, &result)))
 		{
 			HRESULT hr = {};
 			result->GetStatus(&hr);
@@ -99,7 +108,7 @@ bool Shader::CompileFromMemory(std::string_view source)
 	return false;
 }
 
-bool Shader::CompileFromFile(std::string_view filePath)
+bool Shader::CompileFromFile(std::string_view filePath, std::string_view entryPoint, std::string_view target)
 {
 	char fullFilePath[MAX_PATH];
 	GetFullPathNameA(filePath.data(), MAX_PATH, fullFilePath, NULL);
@@ -116,7 +125,7 @@ bool Shader::CompileFromFile(std::string_view filePath)
 		memory.push_back((char)c);
 	}
 	std::fclose(file);
-	return CompileFromMemory(std::string(memory.begin(), memory.end()));
+	return CompileFromMemory(std::string(memory.begin(), memory.end()), entryPoint, target);
 }
 
 void Shader::Release()

@@ -36,6 +36,7 @@ static LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			application->OnUpdate();
 			application->OnRender();
+			application->Present();
 		}
 		return 0;
 

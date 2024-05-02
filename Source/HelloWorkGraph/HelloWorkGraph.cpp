@@ -50,7 +50,7 @@ class HelloWorkGraphApplication : public LearningWorkGraph::Application
 public:
 	virtual void OnInitialize() override;
 	virtual void OnUpdate() override {}
-	virtual void OnRender() override {}
+	virtual void OnRender() override;
 
 private:
 	bool EnsureWorkGraphsSupported();
@@ -63,6 +63,8 @@ private:
 
 private:
 	static constexpr const wchar_t* k_programName = L"Hello World";
+	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
+	ComPtr<ID3D12PipelineState> m_pipelineState = nullptr;
 
 };
 
@@ -76,7 +78,7 @@ void HelloWorkGraphApplication::OnInitialize()
 	}
 
 	auto shader = LearningWorkGraph::Shader();
-	shader.CompileFromFile("Shader/Shader.shader");
+	shader.CompileFromFile("Shader/Shader.shader", "", "lib_6_8");
 
 	ComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature();
 
@@ -88,6 +90,46 @@ void HelloWorkGraphApplication::OnInitialize()
 	{
 		printf("SUCCESS: Output was \"%s\"\n", result);
 	}
+
+	{
+		CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
+		rootSignatureDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+		ComPtr<ID3DBlob> signature = nullptr;
+		ComPtr<ID3DBlob> error = nullptr;
+		LWG_CHECK(SUCCEEDED(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error)));
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature))));
+	}
+
+
+	// Define the vertex input layout.
+	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	auto vertexShader = LearningWorkGraph::Shader();
+	vertexShader.CompileFromFile("Shader/Shader.shader", "VSMain", "vs_6_5");
+
+	// Describe and create the graphics pipeline state object (PSO).
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+	psoDesc.pRootSignature = m_rootSignature.Get();
+	psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.GetData(), vertexShader.GetSize());
+#if 0
+	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
+#endif
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	psoDesc.DepthStencilState.DepthEnable = FALSE;
+	psoDesc.DepthStencilState.StencilEnable = FALSE;
+	psoDesc.SampleMask = UINT_MAX;
+	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	psoDesc.NumRenderTargets = 1;
+	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	psoDesc.SampleDesc.Count = 1;
+	LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState))));
 }
 
 bool HelloWorkGraphApplication::EnsureWorkGraphsSupported()
@@ -275,6 +317,72 @@ bool HelloWorkGraphApplication::DispatchWorkGraphAndReadResults(ComPtr<ID3D12Roo
 
 	LWG_CHECK_WITH_MESSAGE(true, "Failed to dispatch work graph and read results.");
 	return false;
+}
+
+void HelloWorkGraphApplication::OnRender()
+{
+	// Record all the commands we need to render the scene into the command list.
+	{
+		// Command list allocators can only be reset when the associated 
+ // command lists have finished execution on the GPU; apps should use 
+ // fences to determine GPU execution progress.
+		LWG_CHECK(SUCCEEDED(m_commandAllocators[m_frameIndex]->Reset()));
+
+		// However, when ExecuteCommandList() is called on a particular command 
+		// list, that command list can then be reset at any time and must be before 
+		// re-recording.
+		LWG_CHECK(SUCCEEDED(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipelineState.Get())));
+
+		// Set necessary state.
+		D3D12_VIEWPORT viewport =
+		{
+			0.0f,
+			0.0f,
+			1280.0f,
+			720.0f,
+			0.0f,
+			1.0f
+		};
+		D3D12_RECT scissorRect =
+		{
+			0,
+			0,
+			1280,
+			720,
+		};
+		m_commandList->SetPipelineState(m_pipelineState.Get());
+		m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+		m_commandList->RSSetViewports(1, &viewport);
+		m_commandList->RSSetScissorRects(1, &scissorRect);
+
+		D3D12_RESOURCE_BARRIER barrier = {};
+		
+		// Indicate that the back buffer will be used as a render target.
+		barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		m_commandList->ResourceBarrier(1, &barrier);
+
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_renderTargetViewHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_renderTargetViewDescriptorSize);
+		m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+		// Record commands.
+		const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+		m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+#if 0
+		m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+		m_commandList->DrawInstanced(3, 1, 0, 0);
+#endif
+
+		// Indicate that the back buffer will now be used to present.
+		barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+		m_commandList->ResourceBarrier(1, &barrier);
+
+		LWG_CHECK(SUCCEEDED(m_commandList->Close()));
+	}
+
+	// Execute the command list.
+	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+	m_d3d12CommandQueue->ExecuteCommandLists(1, ppCommandLists);
 }
 
 int main()
