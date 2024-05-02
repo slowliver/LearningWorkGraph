@@ -19,6 +19,8 @@ public:
 
 	ID3D12Device9* GetD3D12Device9() { return m_d3d12Device.Get(); }
 
+	virtual void OnInitialize() {}
+
 private:
 	void WaitForGPU();
 	void MoveToNextFrame();

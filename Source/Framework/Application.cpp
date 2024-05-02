@@ -129,6 +129,8 @@ void Application::Initialize(const Framework* framework)
 		// complete before continuing.
 		WaitForGPU();
 	}
+
+	OnInitialize();
 }
 
 void Application::Terminate()

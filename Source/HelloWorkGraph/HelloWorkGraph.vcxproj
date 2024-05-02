@@ -48,11 +48,15 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(ProjectDir)d3d12\inc;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionPath)\..\Include\;$(ProjectDir)d3d12\inc;$(IncludePath)</IncludePath>
+    <OutDir>$(SolutionDir)Binary\$(Platform)\$(Configuration)\</OutDir>
+    <LibraryPath>$(SolutionDir)Library\$(Platform)\$(Configuration)\;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(ProjectDir)d3d12\inc;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionPath)\..\Include\;$(ProjectDir)d3d12\inc;$(IncludePath)</IncludePath>
+    <OutDir>$(SolutionDir)Binary\$(Platform)\$(Configuration)\</OutDir>
+    <LibraryPath>$(SolutionDir)Library\$(Platform)\$(Configuration)\;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -66,7 +70,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Framework.lib;d3d12.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>
@@ -89,7 +93,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Framework.lib;d3d12.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>
@@ -97,25 +101,13 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="HelloWorkGraph.cpp" />
-    <ClCompile Include="Source\Application.cpp" />
-    <ClCompile Include="Source\Framework.cpp" />
-    <ClCompile Include="Source\Shader.cpp" />
-  </ItemGroup>
-  <ItemGroup>
+    <None Include="packages.config" />
     <CopyFileToFolders Include="Shader\Shader.shader">
       <FileType>Document</FileType>
-      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Identity)</DestinationFileName>
-      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity)</DestinationFileName>
     </CopyFileToFolders>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Source\Application.h" />
-    <ClInclude Include="Source\Framework.h" />
-    <ClInclude Include="Source\Shader.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="packages.config" />
+    <ClCompile Include="HelloWorkGraph.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

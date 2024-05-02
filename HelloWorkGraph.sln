@@ -6,6 +6,9 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Framework", "Source\Framework\Framework.vcxproj", "{B232F785-3F8A-4AA0-9029-F439852DC4D4}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloWorkGraph", "Source\HelloWorkGraph\HelloWorkGraph.vcxproj", "{673AC41E-F813-4C5C-B8B5-71FF540C7672}"
+	ProjectSection(ProjectDependencies) = postProject
+		{B232F785-3F8A-4AA0-9029-F439852DC4D4} = {B232F785-3F8A-4AA0-9029-F439852DC4D4}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
