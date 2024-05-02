@@ -1,8 +1,5 @@
-﻿// Framework.cpp : スタティック ライブラリ用の関数を定義します。
-//
-
-#include "Shader.h"
-#include "Framework.h"
+﻿#include <Framework/Shader.h>
+#include <Framework/Framework.h>
 
 #include <memory>
 #include <vector>

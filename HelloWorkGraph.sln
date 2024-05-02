@@ -3,7 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.7.34031.279
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloWorkGraph", "HelloWorkGraph.vcxproj", "{673AC41E-F813-4C5C-B8B5-71FF540C7672}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Framework", "Source\Framework\Framework.vcxproj", "{B232F785-3F8A-4AA0-9029-F439852DC4D4}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HelloWorkGraph", "Source\HelloWorkGraph\HelloWorkGraph.vcxproj", "{673AC41E-F813-4C5C-B8B5-71FF540C7672}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -13,6 +15,12 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B232F785-3F8A-4AA0-9029-F439852DC4D4}.Debug|x64.ActiveCfg = Debug|x64
+		{B232F785-3F8A-4AA0-9029-F439852DC4D4}.Debug|x64.Build.0 = Debug|x64
+		{B232F785-3F8A-4AA0-9029-F439852DC4D4}.Debug|x86.ActiveCfg = Debug|x64
+		{B232F785-3F8A-4AA0-9029-F439852DC4D4}.Release|x64.ActiveCfg = Release|x64
+		{B232F785-3F8A-4AA0-9029-F439852DC4D4}.Release|x64.Build.0 = Release|x64
+		{B232F785-3F8A-4AA0-9029-F439852DC4D4}.Release|x86.ActiveCfg = Release|x64
 		{673AC41E-F813-4C5C-B8B5-71FF540C7672}.Debug|x64.ActiveCfg = Debug|x64
 		{673AC41E-F813-4C5C-B8B5-71FF540C7672}.Debug|x64.Build.0 = Debug|x64
 		{673AC41E-F813-4C5C-B8B5-71FF540C7672}.Debug|x86.ActiveCfg = Debug|x64

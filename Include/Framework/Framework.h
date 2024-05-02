@@ -11,9 +11,15 @@ namespace LearningWorkGraph
 class Framework
 {
 public:
-	static void ShowDialog(std::string_view title, std::string_view message)
-	{
-		MessageBoxA(NULL, message.data(), title.data(), MB_OK);
-	}
+	void Initialize();
+	void Run();
+	void Terminate() {}
+
+	HWND GetHWND() const { return m_hwnd; }
+
+	static void ShowDialog(std::string_view title, std::string_view message);
+
+private:
+	HWND m_hwnd = {};
 };
 }
