@@ -68,101 +68,12 @@ void Application::Initialize(const Framework* framework)
 
 	LWG_CHECK_WITH_MESSAGE(m_d3d12Device, "Failed to initialize compiler.");
 
-#if 0
-	// Describe and create the command queue.
-	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-#if 0
-	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_DISABLE_GPU_TIMEOUT;
-#endif
-	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-
-	LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_d3d12CommandQueue))));
-
-	if (auto hwnd = framework->GetHWND())
-	{
-		// Describe and create the swap chain.
-		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-		swapChainDesc.BufferCount = k_frameCount;
-		swapChainDesc.Width = 1280;
-		swapChainDesc.Height = 720;
-		swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-		swapChainDesc.SampleDesc.Count = 1;
-
-		ComPtr<IDXGISwapChain1> swapChain = nullptr;
-
-		LWG_CHECK(SUCCEEDED(dxgiFactory4->CreateSwapChainForHwnd(m_d3d12CommandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &swapChain)));
-
-		// This sample does not support fullscreen transitions.
-		LWG_CHECK(SUCCEEDED(dxgiFactory4->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER)));
-
-		LWG_CHECK(SUCCEEDED(swapChain.As(&m_dxgiSwapChain)));
-		m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
-	}
-
-	// Create descriptor heaps.
-	{
-		// Describe and create a render target view (RTV) descriptor heap.
-		D3D12_DESCRIPTOR_HEAP_DESC renderTargetViewHeapDesc = {};
-		renderTargetViewHeapDesc.NumDescriptors = k_frameCount;
-		renderTargetViewHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-		renderTargetViewHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateDescriptorHeap(&renderTargetViewHeapDesc, IID_PPV_ARGS(&m_renderTargetViewHeap))));
-		m_renderTargetViewDescriptorSize = m_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	}
-
-	// Create frame resources.
-	{
-		auto renderTargetViewHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_renderTargetViewHeap->GetCPUDescriptorHandleForHeapStart());
-
-		// Create a RTV and a command allocator for each frame.
-		for (UINT n = 0; n < k_frameCount; n++)
-		{
-			LWG_CHECK(SUCCEEDED(m_dxgiSwapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n]))));
-			m_d3d12Device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, renderTargetViewHandle);
-			renderTargetViewHandle.Offset(1, m_renderTargetViewDescriptorSize);
-			LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n]))));
-		}
-	}
-
-	LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), NULL, IID_PPV_ARGS(&m_commandList))));
-	LWG_CHECK(SUCCEEDED(m_commandList->Close()));
-
-	// Create synchronization objects and wait until assets have been uploaded to the GPU.
-	{
-		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence))));
-		m_fenceValues[m_frameIndex]++;
-
-		// Create an event handle to use for frame synchronization.
-		m_fenceEvent = CreateEventA(nullptr, FALSE, FALSE, "Fence Event");
-		if (m_fenceEvent == nullptr)
-		{
-			LWG_CHECK(SUCCEEDED(HRESULT_FROM_WIN32(GetLastError())));
-		}
-
-		// Wait for the command list to execute; we are reusing the same command 
-		// list in our main loop but for now, we just want to wait for setup to 
-		// complete before continuing.
-		WaitForGPU();
-	}
-#endif
-
 	OnInitialize();
 }
 
 void Application::Terminate()
 {
 	HRESULT hr = {};
-
-#if 0
-	// Ensure that the GPU is no longer referencing resources that are about to be cleaned up by the destructor.
-	WaitForGPU();
-
-	CloseHandle(m_fenceEvent);
-#endif
-
 #if defined(_DEBUG) && 0
 	ComPtr<IDXGIDebug> dxgiDebug = nullptr;
 
@@ -180,63 +91,4 @@ void Application::Terminate()
 	}
 #endif
 }
-
-
-#if 0
-void Application::Present()
-{
-#if 0
-	// Record all the commands we need to render the scene into the command list.
-	PopulateCommandList();
-
-	// Execute the command list.
-	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
-	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-#endif
-
-	// Present the frame.
-	LWG_CHECK(SUCCEEDED(m_dxgiSwapChain->Present(1, 0)));
-
-	MoveToNextFrame();
-}
-#endif
-
-#if 0
-// Wait for pending GPU work to complete.
-void Application::WaitForGPU()
-{
-	// Schedule a Signal command in the queue.
-	LWG_CHECK(SUCCEEDED(m_d3d12CommandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex])));
-
-	// Wait until the fence has been processed.
-	LWG_CHECK(SUCCEEDED(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent)));
-	WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
-
-	// Increment the fence value for the current frame.
-	++m_fenceValues[m_frameIndex];
-}
-#endif
-
-#if 0
-// Prepare to render the next frame.
-void Application::MoveToNextFrame()
-{
-	// Schedule a Signal command in the queue.
-	const auto currentFenceValue = m_fenceValues[m_frameIndex];
-	LWG_CHECK(SUCCEEDED(m_d3d12CommandQueue->Signal(m_fence.Get(), currentFenceValue)));
-
-	// Update the frame index.
-	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
-
-	// If the next frame is not ready to be rendered yet, wait until it is ready.
-	if (m_fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
-	{
-		LWG_CHECK(SUCCEEDED(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent)));
-		WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
-	}
-
-	// Set the fence value for the next frame.
-	m_fenceValues[m_frameIndex] = currentFenceValue + 1;
-}
-#endif
 }

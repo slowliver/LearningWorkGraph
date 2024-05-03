@@ -24,39 +24,13 @@ public:
 	virtual void OnUpdate() = 0;
 	virtual void OnRender() = 0;
 
-#if 0
-	void Present();
-#endif
-
 	static Application* GetMainApplication() { return s_instance; }
-
-private:
-	void WaitForGPU();
-	void MoveToNextFrame();
 
 protected:
 	static constexpr uint32_t k_frameCount = 2;
 	static Application* s_instance;
 	Microsoft::WRL::ComPtr<ID3D12Device9> m_d3d12Device = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue = nullptr;
-#if 0
-	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_dxgiSwapChain = nullptr;
-	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_renderTargetViewHeap = nullptr;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocators[k_frameCount] = {};
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_renderTargets[k_frameCount] = {};
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList = nullptr;
-#endif
 
-#if 0
-	// Fence Objects.
-	uint32_t m_frameIndex = 0;
-	HANDLE m_fenceEvent = {};
-	Microsoft::WRL::ComPtr<ID3D12Fence> m_fence = nullptr;
-	uint64_t m_fenceValues[k_frameCount] = {};
-#endif
-
-#if 0
-	size_t m_renderTargetViewDescriptorSize = 0;
-#endif
 };
 }

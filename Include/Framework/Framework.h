@@ -5,6 +5,7 @@
 
 #define LWG_CHECK(value) if(!(value)) { LearningWorkGraph::Framework::ShowDialog("Error", #value); std::abort(); }
 #define LWG_CHECK_WITH_MESSAGE(value, ...) if(!(value)) { LearningWorkGraph::Framework::ShowDialog("Error", __VA_ARGS__); std::abort(); }
+#define LWG_CHECK_HRESULT(value) if(FAILED(value)) { LearningWorkGraph::Framework::ShowDialog("Error", #value); std::abort(); }
 
 namespace LearningWorkGraph
 {
