@@ -103,6 +103,16 @@ bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPo
 				std::memcpy(m_compilerBufferData.get(), data->GetBufferPointer(), m_compilerBufferDataSize);
 				return true;
 			}
+			else
+			{
+//				ID3DBlob* data = nullptr;
+				ComPtr<IDxcBlobEncoding> errorBuffer = nullptr;
+				result->GetErrorBuffer(&errorBuffer);
+				if (errorBuffer)
+				{
+					printf((const char*)errorBuffer->GetBufferPointer());
+				}
+			}
 		}
 	}
 	return false;

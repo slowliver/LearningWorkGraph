@@ -68,6 +68,7 @@ void Application::Initialize(const Framework* framework)
 
 	LWG_CHECK_WITH_MESSAGE(m_d3d12Device, "Failed to initialize compiler.");
 
+#if 0
 	// Describe and create the command queue.
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
@@ -78,25 +79,28 @@ void Application::Initialize(const Framework* framework)
 
 	LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_d3d12CommandQueue))));
 
-	// Describe and create the swap chain.
-	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-	swapChainDesc.BufferCount = k_frameCount;
-	swapChainDesc.Width = 1280;
-	swapChainDesc.Height = 720;
-	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	swapChainDesc.SampleDesc.Count = 1;
+	if (auto hwnd = framework->GetHWND())
+	{
+		// Describe and create the swap chain.
+		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+		swapChainDesc.BufferCount = k_frameCount;
+		swapChainDesc.Width = 1280;
+		swapChainDesc.Height = 720;
+		swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+		swapChainDesc.SampleDesc.Count = 1;
 
-	ComPtr<IDXGISwapChain1> swapChain = nullptr;
+		ComPtr<IDXGISwapChain1> swapChain = nullptr;
 
-	LWG_CHECK(SUCCEEDED(dxgiFactory4->CreateSwapChainForHwnd(m_d3d12CommandQueue.Get(), framework->GetHWND(), &swapChainDesc, nullptr, nullptr, &swapChain)));
+		LWG_CHECK(SUCCEEDED(dxgiFactory4->CreateSwapChainForHwnd(m_d3d12CommandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &swapChain)));
 
-	// This sample does not support fullscreen transitions.
-	LWG_CHECK(SUCCEEDED(dxgiFactory4->MakeWindowAssociation(framework->GetHWND(), DXGI_MWA_NO_ALT_ENTER)));
+		// This sample does not support fullscreen transitions.
+		LWG_CHECK(SUCCEEDED(dxgiFactory4->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER)));
 
-	LWG_CHECK(SUCCEEDED(swapChain.As(&m_dxgiSwapChain)));
-	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
+		LWG_CHECK(SUCCEEDED(swapChain.As(&m_dxgiSwapChain)));
+		m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
+	}
 
 	// Create descriptor heaps.
 	{
@@ -143,6 +147,7 @@ void Application::Initialize(const Framework* framework)
 		// complete before continuing.
 		WaitForGPU();
 	}
+#endif
 
 	OnInitialize();
 }
@@ -151,10 +156,12 @@ void Application::Terminate()
 {
 	HRESULT hr = {};
 
+#if 0
 	// Ensure that the GPU is no longer referencing resources that are about to be cleaned up by the destructor.
 	WaitForGPU();
 
 	CloseHandle(m_fenceEvent);
+#endif
 
 #if defined(_DEBUG) && 0
 	ComPtr<IDXGIDebug> dxgiDebug = nullptr;
@@ -174,6 +181,8 @@ void Application::Terminate()
 #endif
 }
 
+
+#if 0
 void Application::Present()
 {
 #if 0
@@ -190,7 +199,9 @@ void Application::Present()
 
 	MoveToNextFrame();
 }
+#endif
 
+#if 0
 // Wait for pending GPU work to complete.
 void Application::WaitForGPU()
 {
@@ -204,7 +215,9 @@ void Application::WaitForGPU()
 	// Increment the fence value for the current frame.
 	++m_fenceValues[m_frameIndex];
 }
+#endif
 
+#if 0
 // Prepare to render the next frame.
 void Application::MoveToNextFrame()
 {
@@ -225,4 +238,5 @@ void Application::MoveToNextFrame()
 	// Set the fence value for the next frame.
 	m_fenceValues[m_frameIndex] = currentFenceValue + 1;
 }
+#endif
 }

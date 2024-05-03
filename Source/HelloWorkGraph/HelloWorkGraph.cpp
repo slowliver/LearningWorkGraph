@@ -104,7 +104,7 @@ void HelloWorkGraphApplication::OnInitialize()
 	auto* d3d12Device9 = GetD3D12Device9();
 
 
-#if 0
+#if 1
 	if (!EnsureWorkGraphsSupported())
 	{
 		return;
@@ -126,6 +126,7 @@ void HelloWorkGraphApplication::OnInitialize()
 
 #endif
 
+#if 0
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC dynamicCBVSRVUAVHeapDesc = {};
 		dynamicCBVSRVUAVHeapDesc.NumDescriptors = 512 * k_frameCount;
@@ -328,6 +329,7 @@ void HelloWorkGraphApplication::OnInitialize()
 	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 	psoDesc.SampleDesc.Count = 1;
 	LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState))));
+#endif
 }
 
 bool HelloWorkGraphApplication::EnsureWorkGraphsSupported()
@@ -519,6 +521,7 @@ bool HelloWorkGraphApplication::DispatchWorkGraphAndReadResults(ComPtr<ID3D12Roo
 
 void HelloWorkGraphApplication::OnUpdate()
 {
+#if 0
 	m_sceneParameters.m_viewProjectionMatrix[0][0] = 2.0f / 1280.0f;
 	m_sceneParameters.m_viewProjectionMatrix[1][1] = 2.0f / 720.0f;
 	m_sceneParameters.m_viewProjectionMatrix[2][2] = 1.0f;
@@ -531,6 +534,7 @@ void HelloWorkGraphApplication::OnUpdate()
 		m_staticConstantBufferViewHeap->GetCPUDescriptorHandleForHeapStart(),
 		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
 	);
+#endif
 
 #if 0
 	m_d3d12Device->CopyDescriptorsSimple
@@ -545,6 +549,7 @@ void HelloWorkGraphApplication::OnUpdate()
 
 void HelloWorkGraphApplication::OnRender()
 {
+#if 0
 	// Record all the commands we need to render the scene into the command list.
 	{
 		// Command list allocators can only be reset when the associated 
@@ -613,12 +618,15 @@ void HelloWorkGraphApplication::OnRender()
 	// Execute the command list.
 	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
 	m_d3d12CommandQueue->ExecuteCommandLists(1, ppCommandLists);
+#endif
 }
 
 int main()
 {
+	LearningWorkGraph::FrameworkDesc frameworkDesc = {};
+
 	auto framework = LearningWorkGraph::Framework();
-	framework.Initialize();
+	framework.Initialize(frameworkDesc);
 
 	auto application = HelloWorkGraphApplication();
 	application.Initialize(&framework);

@@ -8,10 +8,15 @@
 
 namespace LearningWorkGraph
 {
+struct FrameworkDesc
+{
+	bool m_useWindow;
+};
+
 class Framework
 {
 public:
-	void Initialize();
+	void Initialize(const FrameworkDesc& desc);
 	void Run();
 	void Terminate() {}
 
