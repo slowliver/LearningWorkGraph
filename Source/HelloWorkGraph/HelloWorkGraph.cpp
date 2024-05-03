@@ -83,17 +83,26 @@ private:
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView = {};
 	ComPtr<ID3D12Resource> m_indexBuffer = nullptr;
 	D3D12_INDEX_BUFFER_VIEW m_indexBufferView = {};
-	
+
+	ComPtr<ID3D12DescriptorHeap> m_dynamicCBVSRVUAVHeap = nullptr;
+	size_t m_cbvSRVUAVDescriptorSize = 0;
+
 	// Constant Buffer.
-	ComPtr<ID3D12DescriptorHeap> m_constantBufferViewHeap = nullptr;
+	ComPtr<ID3D12DescriptorHeap> m_staticConstantBufferViewHeap = nullptr;
 	SceneParameters m_sceneParameters = {};
 	ComPtr<ID3D12Resource> m_sceneParametersConstantBuffer = {};
 	std::byte* m_sceneParametersDataBegin = nullptr;
+
+	// Instance Buffer.
+	static constexpr uint32_t k_numInstance = 128;
+	ComPtr<ID3D12DescriptorHeap> m_staticShaderResourceViewHeap = nullptr;
+	ComPtr<ID3D12Resource> m_instanceBuffer = nullptr;
 };
 
 void HelloWorkGraphApplication::OnInitialize()
 {
 	auto* d3d12Device9 = GetD3D12Device9();
+
 
 #if 0
 	if (!EnsureWorkGraphsSupported())
@@ -118,24 +127,45 @@ void HelloWorkGraphApplication::OnInitialize()
 #endif
 
 	{
+		D3D12_DESCRIPTOR_HEAP_DESC dynamicCBVSRVUAVHeapDesc = {};
+		dynamicCBVSRVUAVHeapDesc.NumDescriptors = 512 * k_frameCount;
+		dynamicCBVSRVUAVHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		dynamicCBVSRVUAVHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateDescriptorHeap(&dynamicCBVSRVUAVHeapDesc, IID_PPV_ARGS(&m_dynamicCBVSRVUAVHeap))));
+		m_cbvSRVUAVDescriptorSize = m_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	}
+
+
+	{
 		// Describe and create a constant buffer view (CBV) descriptor heap.
 // Flags indicate that this descriptor heap can be bound to the pipeline 
 // and that descriptors contained in it can be referenced by a root table.
 		D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
 		cbvHeapDesc.NumDescriptors = 1;
-		cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 		cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&m_constantBufferViewHeap))));
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&m_staticConstantBufferViewHeap))));
+	}
+
+	{
+		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+		srvHeapDesc.NumDescriptors = 1024;
+		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_staticShaderResourceViewHeap))));
 	}
 
 	{
 		CD3DX12_DESCRIPTOR_RANGE ranges[1] = {};
-		CD3DX12_ROOT_PARAMETER rootParameters[1] = {};
-		ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0);
-		rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
+		CD3DX12_ROOT_PARAMETER rootParameters[2] = {};
+		ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, UINT_MAX, 0, 0);
+		rootParameters[0].InitAsDescriptorTable(_countof(ranges), &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
+
+		ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 0);
+		rootParameters[1].InitAsDescriptorTable(_countof(ranges), &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
 
 		CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-		rootSignatureDesc.Init(1, rootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+		rootSignatureDesc.Init(_countof(rootParameters), rootParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 		ComPtr<ID3DBlob> signature = nullptr;
 		ComPtr<ID3DBlob> error = nullptr;
@@ -159,7 +189,7 @@ void HelloWorkGraphApplication::OnInitialize()
 		D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
 		cbvDesc.BufferLocation = m_sceneParametersConstantBuffer->GetGPUVirtualAddress();
 		cbvDesc.SizeInBytes = sizeof(SceneParameters);
-		m_d3d12Device->CreateConstantBufferView(&cbvDesc, m_constantBufferViewHeap->GetCPUDescriptorHandleForHeapStart());
+		m_d3d12Device->CreateConstantBufferView(&cbvDesc, m_staticConstantBufferViewHeap->GetCPUDescriptorHandleForHeapStart());
 
 		// Map and initialize the constant buffer. We don't unmap this until the app closes. Keeping things mapped for the lifetime of the resource is okay.
 		CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
@@ -245,6 +275,28 @@ void HelloWorkGraphApplication::OnInitialize()
 		m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
 		m_indexBufferView.SizeInBytes = sizeof(uint16_t) * indices.size();
 		m_indexBufferView.Format = DXGI_FORMAT_R16_UINT;
+	}
+
+	// Create Instance Buffer.
+	if (0){
+		auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+		auto buffer = CD3DX12_RESOURCE_DESC::Buffer(sizeof(float) * k_numInstance);
+		LWG_CHECK(SUCCEEDED(m_d3d12Device->CreateCommittedResource(
+			&heapProperties,
+			D3D12_HEAP_FLAG_NONE,
+			&buffer,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&m_instanceBuffer))));
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+		srvDesc.Buffer.FirstElement = 0;
+		srvDesc.Buffer.NumElements = k_numInstance;
+		srvDesc.Buffer.StructureByteStride = sizeof(float);
+		srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		m_d3d12Device->CreateShaderResourceView(m_instanceBuffer.Get(), &srvDesc, m_staticShaderResourceViewHeap->GetCPUDescriptorHandleForHeapStart());
 	}
 
 	// Define the vertex input layout.
@@ -467,8 +519,28 @@ bool HelloWorkGraphApplication::DispatchWorkGraphAndReadResults(ComPtr<ID3D12Roo
 
 void HelloWorkGraphApplication::OnUpdate()
 {
-	m_sceneParameters.m_viewProjectionMatrix[0][0] += 0.001f;
+	m_sceneParameters.m_viewProjectionMatrix[0][0] = 2.0f / 1280.0f;
+	m_sceneParameters.m_viewProjectionMatrix[1][1] = 2.0f / 720.0f;
+	m_sceneParameters.m_viewProjectionMatrix[2][2] = 1.0f;
 	memcpy(m_sceneParametersDataBegin, &m_sceneParameters, sizeof(m_sceneParameters));
+
+	m_d3d12Device->CopyDescriptorsSimple
+	(
+		1,
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(m_dynamicCBVSRVUAVHeap->GetCPUDescriptorHandleForHeapStart(), 512 * m_frameIndex, m_cbvSRVUAVDescriptorSize),
+		m_staticConstantBufferViewHeap->GetCPUDescriptorHandleForHeapStart(),
+		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
+	);
+
+#if 0
+	m_d3d12Device->CopyDescriptorsSimple
+	(
+		1,
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(m_dynamicCBVSRVUAVHeap->GetCPUDescriptorHandleForHeapStart(), 512 * m_frameIndex + 1, m_cbvSRVUAVDescriptorSize),
+		m_staticShaderResourceViewHeap->GetCPUDescriptorHandleForHeapStart(),
+		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
+	);
+#endif
 }
 
 void HelloWorkGraphApplication::OnRender()
@@ -516,9 +588,12 @@ void HelloWorkGraphApplication::OnRender()
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_renderTargetViewHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_renderTargetViewDescriptorSize);
 		m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-		ID3D12DescriptorHeap* heaps[] = { m_constantBufferViewHeap.Get() };
+		ID3D12DescriptorHeap* heaps[] = { m_dynamicCBVSRVUAVHeap.Get() };
+		auto descriptor = CD3DX12_GPU_DESCRIPTOR_HANDLE(m_dynamicCBVSRVUAVHeap->GetGPUDescriptorHandleForHeapStart(), 512 * m_frameIndex, m_cbvSRVUAVDescriptorSize);
 		m_commandList->SetDescriptorHeaps(1, heaps);
-		m_commandList->SetGraphicsRootDescriptorTable(0, m_constantBufferViewHeap->GetGPUDescriptorHandleForHeapStart());
+		m_commandList->SetGraphicsRootDescriptorTable(0, descriptor);
+		auto srvDescriptor = CD3DX12_GPU_DESCRIPTOR_HANDLE(m_dynamicCBVSRVUAVHeap->GetGPUDescriptorHandleForHeapStart(), 512 * m_frameIndex + 1, m_cbvSRVUAVDescriptorSize);
+		m_commandList->SetGraphicsRootDescriptorTable(1, srvDescriptor);
 
 		// Record commands.
 		const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };

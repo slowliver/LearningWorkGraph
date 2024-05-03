@@ -29,9 +29,11 @@ ConstantBuffer<SceneParameters> sceneParameters : register(b0);
 VSOutputToPSInput VSMain(VSInput i)
 {
 	VSOutputToPSInput o = (VSOutputToPSInput)0;
+	
+	float3 position = float3(i.position, 1.0f);
+	position = mul(position, (float3x3)sceneParameters.viewProjectionMatrix);
 
-	o.position = float4(i.position, 0.0f, 1.0f);
-	o.position.x += sceneParameters.viewProjectionMatrix._m00;
+	o.position = float4(position.xy, 0.0f, 1.0f);
 	o.color = float4(i.position, 0.0f, 1.0f);
 	
 	return o;

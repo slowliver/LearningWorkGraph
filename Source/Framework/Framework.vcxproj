@@ -19,6 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Include\Framework\Application.h" />
+    <ClInclude Include="..\..\Include\Framework\Float4.h" />
     <ClInclude Include="..\..\Include\Framework\Framework.h" />
     <ClInclude Include="..\..\Include\Framework\Shader.h" />
   </ItemGroup>

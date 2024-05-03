@@ -34,9 +34,9 @@ static LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_PAINT:
 		if (application)
 		{
-			application->OnUpdate();
-			application->OnRender();
-			application->Present();
+	//		application->OnUpdate();
+	//		application->OnRender();
+	//		application->Present();
 		}
 		return 0;
 
@@ -82,7 +82,7 @@ void Framework::Initialize()
 		nullptr,        // We aren't using menus.
 		instance,
 		NULL);
-
+	
 	ShowWindow(m_hwnd, SW_SHOW);
 }
 
