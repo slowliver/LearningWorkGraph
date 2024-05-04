@@ -1,4 +1,5 @@
-﻿RWByteAddressBuffer Output : register(u0);
+﻿ByteAddressBuffer input : register(t0);
+RWByteAddressBuffer Output : register(u0);
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
@@ -12,7 +13,8 @@ void BroadcastNode()
 [numthreads(1024, 1, 1)]
 void CSMain(uint dispatchThreadID : SV_DispatchThreadID)
 {
-	Output.Store(dispatchThreadID * 4, dispatchThreadID);
+	uint value = input.Load(dispatchThreadID * 4);
+	Output.Store(dispatchThreadID * 4, value);
 }
 
 struct VSInput

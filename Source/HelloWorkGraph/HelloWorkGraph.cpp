@@ -70,6 +70,13 @@ private:
 	void ExecuteComputeShader();
 
 private:
+	enum CBVSRVUAVRootParameterSlotID
+	{
+		ConstantBufferView = 0,
+		ShaderResourceView = 1,
+		UnorderedAccessView = 2,
+		Count
+	};
 	ComPtr<ID3D12CommandQueue> m_commandQueue = nullptr;
 	ComPtr<ID3D12CommandAllocator> m_commandAllocator = nullptr;
 	ComPtr<ID3D12GraphicsCommandList10> m_commandList = nullptr;
@@ -77,6 +84,7 @@ private:
 	uint64_t m_fenceValue = 0;
 
 	uint32_t m_numSortElements = 1 << 10;
+	ComPtr<ID3D12Resource> m_inputBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_sortedBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_sortedBufferCPUReadback = nullptr;
 
@@ -128,7 +136,7 @@ void HelloWorkGraphApplication::OnInitialize()
 	int n = (1 << logn);
 
 	auto randomEngine = std::mt19937();
-	auto random = std::uniform_int_distribution<uint32_t>(0, n - 15);
+	auto random = std::uniform_int_distribution<uint32_t>(0, n - 1);
 
 	auto a0 = std::unique_ptr<int[]>(new int[n]);
 	for (uint32_t i = 0; i < n; ++i)
@@ -353,18 +361,41 @@ bool HelloWorkGraphApplication::DispatchWorkGraphAndReadResults(ComPtr<ID3D12Roo
 
 void HelloWorkGraphApplication::CreateBasePipeline()
 {
-	m_sortedBuffer = CreateBuffer
-	(
-		sizeof(uint32_t) * m_numSortElements,
-		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-		D3D12_HEAP_TYPE_DEFAULT
-	);
-	m_sortedBufferCPUReadback = CreateBuffer
-	(
-		sizeof(uint32_t) * m_numSortElements,
-		D3D12_RESOURCE_FLAG_NONE,
-		D3D12_HEAP_TYPE_READBACK
-	);
+	// Create input resource.
+	{
+		auto randomEngine = std::mt19937();
+		auto random = std::uniform_int_distribution<uint32_t>(0, m_numSortElements - 1);
+		m_inputBuffer = CreateBuffer
+		(
+			sizeof(uint32_t) * m_numSortElements,
+			D3D12_RESOURCE_FLAG_NONE,
+			D3D12_HEAP_TYPE_UPLOAD
+		);
+		uint32_t* buffer = nullptr;
+		auto range = CD3DX12_RANGE(0, sizeof(uint32_t) * m_numSortElements);
+		LWG_CHECK_HRESULT(m_inputBuffer->Map(0, &range, (void**)&buffer));
+		for (uint32_t i = 0; i < m_numSortElements; ++i)
+		{
+			buffer[i] = random(randomEngine);
+		}
+		m_inputBuffer->Unmap(0, NULL);
+	}
+
+	// Create output resource.
+	{
+		m_sortedBuffer = CreateBuffer
+		(
+			sizeof(uint32_t) * m_numSortElements,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+			D3D12_HEAP_TYPE_DEFAULT
+		);
+		m_sortedBufferCPUReadback = CreateBuffer
+		(
+			sizeof(uint32_t) * m_numSortElements,
+			D3D12_RESOURCE_FLAG_NONE,
+			D3D12_HEAP_TYPE_READBACK
+		);
+	}
 
 	D3D12_COMMAND_QUEUE_DESC commandQueueDesc = {};
 	commandQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_DISABLE_GPU_TIMEOUT;
@@ -382,9 +413,11 @@ void HelloWorkGraphApplication::CreateComputePipeline()
 	auto computeShader = LearningWorkGraph::Shader();
 	LWG_CHECK(computeShader.CompileFromFile("Shader/Shader.shader", "CSMain", "cs_6_5"));
 
-	auto rootParameter = CD3DX12_ROOT_PARAMETER();
-	rootParameter.InitAsUnorderedAccessView(0, 0);
-	auto rootSignatureDesc = CD3DX12_ROOT_SIGNATURE_DESC(1, &rootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+	CD3DX12_ROOT_PARAMETER rootParameter[CBVSRVUAVRootParameterSlotID::Count] = {};
+	rootParameter[CBVSRVUAVRootParameterSlotID::ConstantBufferView].InitAsConstantBufferView(0, 0);
+	rootParameter[CBVSRVUAVRootParameterSlotID::ShaderResourceView].InitAsShaderResourceView(0, 0);
+	rootParameter[CBVSRVUAVRootParameterSlotID::UnorderedAccessView].InitAsUnorderedAccessView(0, 0);
+	auto rootSignatureDesc = CD3DX12_ROOT_SIGNATURE_DESC(CBVSRVUAVRootParameterSlotID::Count, rootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 	ComPtr<ID3DBlob> serialized = nullptr;
 	LWG_CHECK_HRESULT(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serialized, NULL));
 	LWG_CHECK_HRESULT(device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&m_computePipeline.m_rootSignature)));
@@ -400,7 +433,8 @@ void HelloWorkGraphApplication::ExecuteComputeShader()
 	CreateComputePipeline();
 	m_commandList->SetComputeRootSignature(m_computePipeline.m_rootSignature.Get());
 	m_commandList->SetPipelineState(m_computePipeline.m_pipelineState.Get());
-	m_commandList->SetComputeRootUnorderedAccessView(0, m_sortedBuffer->GetGPUVirtualAddress());
+	m_commandList->SetComputeRootShaderResourceView(CBVSRVUAVRootParameterSlotID::ShaderResourceView, m_inputBuffer->GetGPUVirtualAddress());
+	m_commandList->SetComputeRootUnorderedAccessView(CBVSRVUAVRootParameterSlotID::UnorderedAccessView, m_sortedBuffer->GetGPUVirtualAddress());
 	m_commandList->Dispatch(1, 1, 1);
 
 	// read results
