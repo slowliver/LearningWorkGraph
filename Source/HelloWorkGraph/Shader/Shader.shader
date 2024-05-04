@@ -1,4 +1,10 @@
-﻿ByteAddressBuffer input : register(t0);
+﻿cbuffer constantBuffer : register(b0)
+{
+	uint numSortElements;
+};
+
+
+ByteAddressBuffer input : register(t0);
 RWByteAddressBuffer Output : register(u0);
 
 [Shader("node")]
@@ -13,6 +19,10 @@ void BroadcastNode()
 [numthreads(1024, 1, 1)]
 void CSMain(uint dispatchThreadID : SV_DispatchThreadID)
 {
+	if (dispatchThreadID >= numSortElements)
+	{
+		return;
+	}
 	uint value = input.Load(dispatchThreadID * 4);
 	Output.Store(dispatchThreadID * 4, value);
 }

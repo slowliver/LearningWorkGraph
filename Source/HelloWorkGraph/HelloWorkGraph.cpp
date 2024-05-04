@@ -49,6 +49,14 @@ using Microsoft::WRL::ComPtr;
 
 class HelloWorkGraphApplication : public LearningWorkGraph::Application
 {
+private:
+	struct ConstantBuffer final
+	{
+		uint32_t m_numSortElements;
+		uint32_t m_dummy[63];
+	};
+	static_assert(sizeof(ConstantBuffer) == 256);
+
 public:
 	virtual void OnInitialize() override;
 	virtual void OnUpdate() override;
@@ -84,6 +92,7 @@ private:
 	uint64_t m_fenceValue = 0;
 
 	uint32_t m_numSortElements = 1 << 10;
+	ComPtr<ID3D12Resource> m_constantBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_inputBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_sortedBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_sortedBufferCPUReadback = nullptr;
@@ -361,6 +370,22 @@ bool HelloWorkGraphApplication::DispatchWorkGraphAndReadResults(ComPtr<ID3D12Roo
 
 void HelloWorkGraphApplication::CreateBasePipeline()
 {
+	// Create constant buffer.
+	{
+		m_constantBuffer = CreateBuffer
+		(
+			sizeof(uint32_t) * m_numSortElements,
+			D3D12_RESOURCE_FLAG_NONE,
+			D3D12_HEAP_TYPE_UPLOAD
+		);
+		ConstantBuffer* constantBuffer = nullptr;
+		auto range = CD3DX12_RANGE(0, sizeof(ConstantBuffer));
+		LWG_CHECK_HRESULT(m_constantBuffer->Map(0, &range, (void**)&constantBuffer));
+		constantBuffer->m_numSortElements = m_numSortElements;
+		memset(constantBuffer->m_dummy, 0, sizeof(constantBuffer->m_dummy));
+		m_constantBuffer->Unmap(0, NULL);
+	}
+
 	// Create input resource.
 	{
 		auto randomEngine = std::mt19937();
@@ -433,6 +458,7 @@ void HelloWorkGraphApplication::ExecuteComputeShader()
 	CreateComputePipeline();
 	m_commandList->SetComputeRootSignature(m_computePipeline.m_rootSignature.Get());
 	m_commandList->SetPipelineState(m_computePipeline.m_pipelineState.Get());
+	m_commandList->SetComputeRootConstantBufferView(CBVSRVUAVRootParameterSlotID::ConstantBufferView, m_constantBuffer->GetGPUVirtualAddress());
 	m_commandList->SetComputeRootShaderResourceView(CBVSRVUAVRootParameterSlotID::ShaderResourceView, m_inputBuffer->GetGPUVirtualAddress());
 	m_commandList->SetComputeRootUnorderedAccessView(CBVSRVUAVRootParameterSlotID::UnorderedAccessView, m_sortedBuffer->GetGPUVirtualAddress());
 	m_commandList->Dispatch(1, 1, 1);
