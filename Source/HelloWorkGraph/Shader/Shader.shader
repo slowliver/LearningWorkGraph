@@ -9,6 +9,12 @@ void BroadcastNode()
 	Output.Store3(0, uint3(0x6C6C6548, 0x6F57206F, 0x00646C72));
 }
 
+[numthreads(1024, 1, 1)]
+void CSMain(uint dispatchThreadID : SV_DispatchThreadID)
+{
+	Output.Store(dispatchThreadID * 4, dispatchThreadID);
+}
+
 struct VSInput
 {
 	float2 position : POSITION;
