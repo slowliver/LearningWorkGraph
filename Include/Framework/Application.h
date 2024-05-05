@@ -31,7 +31,8 @@ protected:
 	static Application* s_instance;
 	Microsoft::WRL::ComPtr<ID3D12Device9> m_d3d12Device = nullptr;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_queryHeap = nullptr;
 	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swapChain = nullptr;
-
+	
 };
 }

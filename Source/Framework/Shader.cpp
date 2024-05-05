@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <cstdio>
+#include <type_traits>
 
 using Microsoft::WRL::ComPtr;
 
@@ -90,7 +91,8 @@ bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPo
 		auto wTarget = std::unique_ptr<wchar_t[]>(new wchar_t[wTargetSize]);
 		MultiByteToWideChar(CP_ACP, 0, target.data(), -1, wTarget.get(), wTargetSize);
 
-		if (SUCCEEDED(compiler->Compile(sourceBlob.Get(), nullptr, wEntryPoint.get(), wTarget.get(), nullptr, 0, nullptr, 0, nullptr, &result)))
+		const wchar_t* arguments[] = { DXC_ARG_DEBUG };
+ 		if (SUCCEEDED(compiler->Compile(sourceBlob.Get(), nullptr, wEntryPoint.get(), wTarget.get(), arguments, std::extent_v<decltype(arguments)>, nullptr, 0, nullptr, &result)))
 		{
 			HRESULT hr = {};
 			result->GetStatus(&hr);

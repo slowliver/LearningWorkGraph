@@ -1,13 +1,18 @@
-﻿cbuffer constantBuffer : register(b0)
+﻿struct ApplicationConstantBuffer
 {
 	uint numSortElements;
+	uint3 dummy0;
+	uint4 dummy1[15];
 };
-
-cbuffer constants : register(b1)
+struct PassConstantBuffer
 {
 	uint inc;
 	uint dir;
+	uint2 dummy;
 };
+
+ConstantBuffer<ApplicationConstantBuffer> applicationConstantBuffer : register(b0);
+ConstantBuffer<PassConstantBuffer> passConstantBuffer : register(b1);
 
 //ByteAddressBuffer input : register(t0);
 RWByteAddressBuffer Output : register(u0);
@@ -24,39 +29,31 @@ void BroadcastNode()
 [numthreads(1024, 1, 1)]
 void CSMain(uint dispatchThreadID : SV_DispatchThreadID, uint groupID : SV_GroupID)
 {
-	if (dispatchThreadID >= numSortElements)
+	if (dispatchThreadID >= applicationConstantBuffer.numSortElements / 2)
 	{
 		return;
 	}
-	#if 0
-	uint value = input.Load(dispatchThreadID * 4);
-	Output.Store(groupID * 4, inc);
-#endif
-	
-	int t = dispatchThreadID; // thread index
-	int low = t & (inc - 1); // low order bits (below INC)
-	int i = (t << 1) - low; // insert 0 at position INC
-	bool reverse = ((dir & i) == 0); // asc/desc order
+
+	// https://www.bealto.com/gpu-sorting_parallel-bitonic-1.html	
+	const uint mask = (passConstantBuffer.inc - 1);
+	const uint low = mask & dispatchThreadID; // low order bits (below INC)
+	const uint i = (dispatchThreadID * 2) - low; // insert 0 at position INC
 
 	// Load
-	uint x0 = Output.Load(i * 4);
-	uint x1 = Output.Load((inc + i) * 4);
+	const uint a = Output.Load(i * 4);
+	const uint b = Output.Load((i + passConstantBuffer.inc) * 4);
 
-	// Sort
+	// Sort & Store
 	{
-		bool swap = reverse ^ (x0 > x1);
-		uint auxa = x0;
-		uint auxb = x1;
+		const bool reverse = ((passConstantBuffer.dir & i) == 0); // asc/desc order
+		const bool swap = reverse ? (a >= b) : (a < b);
 		if (swap)
 		{
-			x0 = auxb;
-			x1 = auxa;
+			// Store
+			Output.Store(i * 4, b);
+			Output.Store((i + passConstantBuffer.inc) * 4, a);
 		}
 	}
-
-	// Store
-	Output.Store(i * 4, x0);
-	Output.Store((inc + i) * 4, x1);
 }
 
 struct VSInput

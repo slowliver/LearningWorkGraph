@@ -71,6 +71,12 @@ void Application::Initialize(const Framework* framework)
 	commandQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateCommandQueue(&commandQueueDesc, IID_PPV_ARGS(&m_commandQueue)));
 
+
+	D3D12_QUERY_HEAP_DESC queryHeapDesc = {};
+	queryHeapDesc.Count = 2;
+	queryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+	LWG_CHECK_HRESULT(m_d3d12Device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&m_queryHeap)));
+
 	if (auto hwnd = framework->GetHWND())
 	{
 		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
