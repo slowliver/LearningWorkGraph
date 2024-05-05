@@ -91,7 +91,13 @@ bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPo
 		auto wTarget = std::unique_ptr<wchar_t[]>(new wchar_t[wTargetSize]);
 		MultiByteToWideChar(CP_ACP, 0, target.data(), -1, wTarget.get(), wTargetSize);
 
-		const wchar_t* arguments[] = { DXC_ARG_DEBUG };
+		const wchar_t* arguments[] =
+		{
+			L"",
+#if defined(_DEBUG)
+			DXC_ARG_DEBUG,
+#endif
+		};
  		if (SUCCEEDED(compiler->Compile(sourceBlob.Get(), nullptr, wEntryPoint.get(), wTarget.get(), arguments, std::extent_v<decltype(arguments)>, nullptr, 0, nullptr, &result)))
 		{
 			HRESULT hr = {};

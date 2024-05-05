@@ -72,16 +72,16 @@ private:
 	ID3D12Resource* CreateBuffer(uint64_t Size, D3D12_RESOURCE_FLAGS ResourceFlags, D3D12_HEAP_TYPE HeapType);
 
 	bool EnsureWorkGraphsSupported();
-	ID3D12RootSignature* CreateGlobalRootSignature();
-	ID3D12StateObject* CreateGWGStateObject(ComPtr<ID3D12RootSignature> pGlobalRootSignature, const LearningWorkGraph::Shader& shader);
 	D3D12_SET_PROGRAM_DESC PrepareWorkGraph(ComPtr<ID3D12StateObject> pStateObject);
 	bool RunCommandListAndWait(ComPtr<ID3D12CommandQueue> pCommandQueue, ComPtr<ID3D12CommandAllocator> pCommandAllocator, ComPtr<ID3D12GraphicsCommandList10> pCommandList, ComPtr<ID3D12Fence> pFence);
-	bool DispatchWorkGraphAndReadResults(ComPtr<ID3D12RootSignature> pGlobalRootSignature, D3D12_SET_PROGRAM_DESC SetProgramDesc, char* pResult);
 
 	void CreateBasePipeline();
-	void CreateComputePipeline();
 
+	void CreateComputePipeline();
 	void ExecuteComputeShader();
+
+	void CreateWorkGraphPipeline();
+	void ExecuteWorkGraph();
 
 private:
 	struct ConstantBufferRegisterID
@@ -111,6 +111,7 @@ private:
 
 	uint32_t m_numSortElementsUnsafe = 1 << 16;
 	uint32_t m_numSortElements = 0;;
+	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 	ComPtr<ID3D12Resource> m_gpuTimeCPUReadbackBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_applicationConstantBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_initialInputBuffer = nullptr;
@@ -119,9 +120,13 @@ private:
 
 	struct ComputePipeline
 	{
-		ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 		ComPtr<ID3D12PipelineState> m_pipelineState = nullptr;
-	} m_computePipeline;
+	} m_computePipeline = {};
+
+	struct WorkGraphPipeline
+	{
+		ComPtr<ID3D12StateObject> m_stateObject = nullptr;
+	} m_workGraphPipeline = {};
 
 private:
 	static constexpr const wchar_t* k_programName = L"Hello World";
@@ -136,6 +141,7 @@ void HelloWorkGraphApplication::OnInitialize()
 
 	CreateBasePipeline();
 
+#if 0
 	{
 		CreateComputePipeline();
 		while (1)
@@ -143,27 +149,16 @@ void HelloWorkGraphApplication::OnInitialize()
 			ExecuteComputeShader();
 		}
 	}
+#endif
 
-#if 0
 	if (!EnsureWorkGraphsSupported())
 	{
 		return;
 	}
 
-	auto shader = LearningWorkGraph::Shader();
-	shader.CompileFromFile("Shader/Shader.shader", "", "lib_6_8");
+	CreateWorkGraphPipeline();
 
-	ComPtr<ID3D12RootSignature> pGlobalRootSignature = CreateGlobalRootSignature();
-
-	ComPtr<ID3D12StateObject> pStateObject = CreateGWGStateObject(pGlobalRootSignature, shader);
-	D3D12_SET_PROGRAM_DESC SetProgramDesc = PrepareWorkGraph(pStateObject);
-
-	char result[UAV_SIZE / sizeof(char)];
-	if (DispatchWorkGraphAndReadResults(pGlobalRootSignature, SetProgramDesc, result))
-	{
-		printf("SUCCESS: Output was \"%s\"\n", result);
-	}
-#endif
+	ExecuteWorkGraph();
 }
 
 bool HelloWorkGraphApplication::EnsureWorkGraphsSupported()
@@ -172,51 +167,6 @@ bool HelloWorkGraphApplication::EnsureWorkGraphsSupported()
 	GetD3D12Device9()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS21, &Options, sizeof(Options));
 	LWG_CHECK_WITH_MESSAGE(Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED, "Failed to ensure work graphs were supported. Check driver and graphics card.");
 	return (Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED);
-}
-
-ID3D12RootSignature* HelloWorkGraphApplication::CreateGlobalRootSignature()
-{
-	ID3D12RootSignature* pRootSignature = nullptr;
-
-	CD3DX12_ROOT_PARAMETER RootSignatureUAV;
-	RootSignatureUAV.InitAsUnorderedAccessView(0, 0);
-
-	CD3DX12_ROOT_SIGNATURE_DESC Desc(1, &RootSignatureUAV, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
-	ComPtr<ID3DBlob> pSerialized;
-
-	HRESULT hr = D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1, &pSerialized, NULL);
-	if (SUCCEEDED(hr))
-	{
-		hr = GetD3D12Device9()->CreateRootSignature(0, pSerialized->GetBufferPointer(), pSerialized->GetBufferSize(), IID_PPV_ARGS(&pRootSignature));
-	}
-
-	LWG_CHECK_WITH_MESSAGE(SUCCEEDED(hr), "Failed to create global root signature.");
-	return pRootSignature;
-}
-
-ID3D12StateObject* HelloWorkGraphApplication::CreateGWGStateObject(ComPtr<ID3D12RootSignature> pGlobalRootSignature, const LearningWorkGraph::Shader& shader)
-{
-	ID3D12StateObject* d3d12StateObject = nullptr;
-
-	auto desc = CD3DX12_STATE_OBJECT_DESC(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
-
-	CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT* globalRootSignatureDesc = desc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
-	globalRootSignatureDesc->SetRootSignature(pGlobalRootSignature.Get());
-
-	// シェーダライブラリを設定.
-	CD3DX12_DXIL_LIBRARY_SUBOBJECT* libraryDesc = desc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
-	CD3DX12_SHADER_BYTECODE libraryCode(shader.GetData(), shader.GetSize());
-	libraryDesc->SetDXILLibrary(&libraryCode);
-
-	// ワークグラフのセットアップ.
-	CD3DX12_WORK_GRAPH_SUBOBJECT* workGraphDesc = desc.CreateSubobject<CD3DX12_WORK_GRAPH_SUBOBJECT>();
-	workGraphDesc->IncludeAllAvailableNodes();		// すべての利用可能なノードを使用する.
-	workGraphDesc->SetProgramName(k_programName);
-
-	HRESULT hr = GetD3D12Device9()->CreateStateObject(desc, IID_PPV_ARGS(&d3d12StateObject));
-	LWG_CHECK_WITH_MESSAGE(SUCCEEDED(hr) && d3d12StateObject, "Failed to create Work Graph State Object.");
-
-	return d3d12StateObject;
 }
 
 ID3D12Resource* HelloWorkGraphApplication::CreateBuffer(uint64_t size, D3D12_RESOURCE_FLAGS resourceFlags, D3D12_HEAP_TYPE heapType)
@@ -287,50 +237,6 @@ bool HelloWorkGraphApplication::RunCommandListAndWait(ComPtr<ID3D12CommandQueue>
 	return false;
 }
 
-bool HelloWorkGraphApplication::DispatchWorkGraphAndReadResults(ComPtr<ID3D12RootSignature> pGlobalRootSignature, D3D12_SET_PROGRAM_DESC SetProgramDesc, char* pResult)
-{
-	ComPtr<ID3D12Resource> pUAVBuffer = CreateBuffer(UAV_SIZE, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_HEAP_TYPE_DEFAULT);
-	ComPtr<ID3D12Resource> pReadbackBuffer = CreateBuffer(UAV_SIZE, D3D12_RESOURCE_FLAG_NONE, D3D12_HEAP_TYPE_READBACK);
-
-	// dispatch work graph
-	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};
-	DispatchGraphDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
-	DispatchGraphDesc.NodeCPUInput = { };
-	DispatchGraphDesc.NodeCPUInput.EntrypointIndex = 0;
-	DispatchGraphDesc.NodeCPUInput.NumRecords = 1;
-
-	m_commandList->SetComputeRootSignature(pGlobalRootSignature.Get());
-	m_commandList->SetComputeRootUnorderedAccessView(0, pUAVBuffer->GetGPUVirtualAddress());
-	m_commandList->SetProgram(&SetProgramDesc);
-	m_commandList->DispatchGraph(&DispatchGraphDesc);
-
-	// read results
-	D3D12_RESOURCE_BARRIER Barrier = {};
-	Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-	Barrier.Transition.pResource = pUAVBuffer.Get();
-	Barrier.Transition.Subresource = 0;
-	Barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-	Barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-
-	m_commandList->ResourceBarrier(1, &Barrier);
-	m_commandList->CopyResource(pReadbackBuffer.Get(), pUAVBuffer.Get());
-
-	if (RunCommandListAndWait(m_commandQueue, m_commandAllocator, m_commandList, m_fence))
-	{
-		char* pOutput;
-		D3D12_RANGE range{ 0, UAV_SIZE };
-		if (SUCCEEDED(pReadbackBuffer->Map(0, &range, (void**)&pOutput)))
-		{
-			memcpy(pResult, pOutput, UAV_SIZE);
-			pReadbackBuffer->Unmap(0, nullptr);
-			return true;
-		}
-	}
-
-	LWG_CHECK_WITH_MESSAGE(true, "Failed to dispatch work graph and read results.");
-	return false;
-}
-
 void HelloWorkGraphApplication::CreateBasePipeline()
 {
 	// Create GPU time buffer.
@@ -398,6 +304,19 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 		m_sortedCPUReadbackBuffer->SetName(L"sortedCPUReadbackBuffer");
 	}
 
+	// Create root signature.
+	{
+		CD3DX12_ROOT_PARAMETER rootParameter[RootParameterSlotID::Count] = {};
+		rootParameter[RootParameterSlotID::ApplicationConstantBufferView].InitAsConstantBufferView(ConstantBufferRegisterID::Application, 0);
+		rootParameter[RootParameterSlotID::PassConstants].InitAsConstants(sizeof(PassConstantBuffer) / sizeof(uint32_t), ConstantBufferRegisterID::Pass, 0);
+		rootParameter[RootParameterSlotID::ShaderResourceView].InitAsShaderResourceView(0, 0);
+		rootParameter[RootParameterSlotID::UnorderedAccessView].InitAsUnorderedAccessView(0, 0);
+		auto rootSignatureDesc = CD3DX12_ROOT_SIGNATURE_DESC(RootParameterSlotID::Count, rootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+		ComPtr<ID3DBlob> serialized = nullptr;
+		LWG_CHECK_HRESULT(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serialized, NULL));
+		LWG_CHECK_HRESULT(m_d3d12Device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+	}
+
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
@@ -405,25 +324,13 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 
 void HelloWorkGraphApplication::CreateComputePipeline()
 {
-	auto* device = GetD3D12Device9();
-
 	auto computeShader = LearningWorkGraph::Shader();
 	LWG_CHECK(computeShader.CompileFromFile("Shader/Shader.shader", "CSMain", "cs_6_5"));
 
-	CD3DX12_ROOT_PARAMETER rootParameter[RootParameterSlotID::Count] = {};
-	rootParameter[RootParameterSlotID::ApplicationConstantBufferView].InitAsConstantBufferView(ConstantBufferRegisterID::Application, 0);
-	rootParameter[RootParameterSlotID::PassConstants].InitAsConstants(sizeof(PassConstantBuffer) / sizeof(uint32_t), ConstantBufferRegisterID::Pass, 0);
-	rootParameter[RootParameterSlotID::ShaderResourceView].InitAsShaderResourceView(0, 0);
-	rootParameter[RootParameterSlotID::UnorderedAccessView].InitAsUnorderedAccessView(0, 0);
-	auto rootSignatureDesc = CD3DX12_ROOT_SIGNATURE_DESC(RootParameterSlotID::Count, rootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
-	ComPtr<ID3DBlob> serialized = nullptr;
-	LWG_CHECK_HRESULT(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serialized, NULL));
-	LWG_CHECK_HRESULT(device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&m_computePipeline.m_rootSignature)));
-
 	D3D12_COMPUTE_PIPELINE_STATE_DESC computePipelineStateDesc = {};
-	computePipelineStateDesc.pRootSignature = m_computePipeline.m_rootSignature.Get();
+	computePipelineStateDesc.pRootSignature = m_rootSignature.Get();
 	computePipelineStateDesc.CS = CD3DX12_SHADER_BYTECODE(computeShader.GetData(), computeShader.GetSize());
-	LWG_CHECK_HRESULT(device->CreateComputePipelineState(&computePipelineStateDesc, IID_PPV_ARGS(&m_computePipeline.m_pipelineState)));
+	LWG_CHECK_HRESULT(m_d3d12Device->CreateComputePipelineState(&computePipelineStateDesc, IID_PPV_ARGS(&m_computePipeline.m_pipelineState)));
 }
 
 void HelloWorkGraphApplication::ExecuteComputeShader()
@@ -447,7 +354,7 @@ void HelloWorkGraphApplication::ExecuteComputeShader()
 		}
 	}
 
-	m_commandList->SetComputeRootSignature(m_computePipeline.m_rootSignature.Get());
+	m_commandList->SetComputeRootSignature(m_rootSignature.Get());
 	m_commandList->SetPipelineState(m_computePipeline.m_pipelineState.Get());
 	m_commandList->SetComputeRootConstantBufferView(RootParameterSlotID::ApplicationConstantBufferView, m_applicationConstantBuffer->GetGPUVirtualAddress());
 	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortedBuffer->GetGPUVirtualAddress());
@@ -489,7 +396,10 @@ void HelloWorkGraphApplication::ExecuteComputeShader()
 	ID3D12CommandList* commandLists[] = { m_commandList.Get()};
 	m_commandQueue->ExecuteCommandLists(1, commandLists);
 
-	m_swapChain->Present(1, 0);
+	if (m_swapChain)
+	{
+		m_swapChain->Present(1, 0);
+	}
 
 	LWG_CHECK_HRESULT(m_commandQueue->Signal(m_fence.Get(), ++m_fenceValue));
 
@@ -527,10 +437,82 @@ void HelloWorkGraphApplication::ExecuteComputeShader()
 	memcpy(output.get(), outputTemp, sizeof(uint32_t) * m_numSortElements);
 	m_sortedCPUReadbackBuffer->Unmap(0, NULL);
 
-//	for (uint32_t i = 0; i < m_numSortElementsUnsafe; ++i)
+#if 0
+	for (uint32_t i = 0; i < m_numSortElementsUnsafe; ++i)
 	{
-		//printf("%u : %u\n", i, output[i]);
+		printf("%u : %u\n", i, output[i]);
 	}
+#endif
+}
+
+void HelloWorkGraphApplication::CreateWorkGraphPipeline()
+{
+	auto shader = LearningWorkGraph::Shader();
+	LWG_CHECK(shader.CompileFromFile("Shader/Shader.shader", "", "lib_6_8"));
+
+	auto desc = CD3DX12_STATE_OBJECT_DESC(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
+
+	CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT* globalRootSignatureDesc = desc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+	globalRootSignatureDesc->SetRootSignature(m_rootSignature.Get());
+
+	// シェーダライブラリを設定.
+	CD3DX12_DXIL_LIBRARY_SUBOBJECT* libraryDesc = desc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+	CD3DX12_SHADER_BYTECODE libraryCode(shader.GetData(), shader.GetSize());
+	libraryDesc->SetDXILLibrary(&libraryCode);
+
+	// ワークグラフのセットアップ.
+	CD3DX12_WORK_GRAPH_SUBOBJECT* workGraphDesc = desc.CreateSubobject<CD3DX12_WORK_GRAPH_SUBOBJECT>();
+	workGraphDesc->IncludeAllAvailableNodes();		// すべての利用可能なノードを使用する.
+	workGraphDesc->SetProgramName(k_programName);
+
+	LWG_CHECK_HRESULT(m_d3d12Device->CreateStateObject(desc, IID_PPV_ARGS(&m_workGraphPipeline.m_stateObject)));
+}
+
+void HelloWorkGraphApplication::ExecuteWorkGraph()
+{
+	ComPtr<ID3D12Resource> pUAVBuffer = CreateBuffer(UAV_SIZE, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_HEAP_TYPE_DEFAULT);
+	ComPtr<ID3D12Resource> pReadbackBuffer = CreateBuffer(UAV_SIZE, D3D12_RESOURCE_FLAG_NONE, D3D12_HEAP_TYPE_READBACK);
+
+	D3D12_SET_PROGRAM_DESC setProgramDesc = PrepareWorkGraph(m_workGraphPipeline.m_stateObject);
+
+	// dispatch work graph
+	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};
+	DispatchGraphDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
+	DispatchGraphDesc.NodeCPUInput = { };
+	DispatchGraphDesc.NodeCPUInput.EntrypointIndex = 0;
+	DispatchGraphDesc.NodeCPUInput.NumRecords = 1;
+
+	m_commandList->SetComputeRootSignature(m_rootSignature.Get());
+	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, pUAVBuffer->GetGPUVirtualAddress());
+	m_commandList->SetProgram(&setProgramDesc);
+	m_commandList->DispatchGraph(&DispatchGraphDesc);
+
+	// read results
+	D3D12_RESOURCE_BARRIER Barrier = {};
+	Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	Barrier.Transition.pResource = pUAVBuffer.Get();
+	Barrier.Transition.Subresource = 0;
+	Barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+	Barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+
+	m_commandList->ResourceBarrier(1, &Barrier);
+	m_commandList->CopyResource(pReadbackBuffer.Get(), pUAVBuffer.Get());
+
+	char result[UAV_SIZE / sizeof(char)];
+	if (RunCommandListAndWait(m_commandQueue, m_commandAllocator, m_commandList, m_fence))
+	{
+		char* pOutput;
+		D3D12_RANGE range{ 0, UAV_SIZE };
+		if (SUCCEEDED(pReadbackBuffer->Map(0, &range, (void**)&pOutput)))
+		{
+			memcpy(result, pOutput, UAV_SIZE);
+			pReadbackBuffer->Unmap(0, NULL);
+			printf("SUCCESS: Output was \"%s\"\n", result);
+			return;
+		}
+	}
+
+	LWG_CHECK_WITH_MESSAGE(true, "Failed to dispatch work graph and read results.");
 }
 
 void HelloWorkGraphApplication::OnUpdate()
@@ -542,7 +524,7 @@ void HelloWorkGraphApplication::OnRender()
 int main()
 {
 	LearningWorkGraph::FrameworkDesc frameworkDesc = {};
-	frameworkDesc.m_useWindow = true;
+	frameworkDesc.m_useWindow = false;
 
 	auto framework = LearningWorkGraph::Framework();
 	framework.Initialize(frameworkDesc);
