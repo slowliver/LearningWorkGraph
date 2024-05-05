@@ -20,11 +20,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ********************************************************************/
 
-#include <windows.h>
-#include <atlbase.h>
-#include <conio.h>
+// C++ STL
+#include <array>
 #include <random>
+#include <bit>
 
+#include <windows.h>
 #include <d3d12.h>
 #include <d3dx12/d3dx12.h>
 #include <dxcapi.h>
@@ -34,7 +35,6 @@ THE SOFTWARE.
 #include <d3d12sdklayers.h>
 #include <dxgidebug.h>
 #endif
-#include <math.h>
 
 #include <Framework/Application.h>
 #include <Framework/Framework.h>
@@ -78,14 +78,14 @@ private:
 	void ExecuteComputeShader();
 
 private:
-	enum CBVSRVUAVRootParameterSlotID
+	enum RootParameterSlotID
 	{
-		ConstantBufferView = 0,
-		ShaderResourceView = 1,
-		UnorderedAccessView = 2,
+		Constants = 0,
+		ConstantBufferView,
+		ShaderResourceView,
+		UnorderedAccessView,
 		Count
 	};
-	ComPtr<ID3D12CommandQueue> m_commandQueue = nullptr;
 	ComPtr<ID3D12CommandAllocator> m_commandAllocator = nullptr;
 	ComPtr<ID3D12GraphicsCommandList10> m_commandList = nullptr;
 	ComPtr<ID3D12Fence> m_fence = nullptr;
@@ -93,7 +93,7 @@ private:
 
 	uint32_t m_numSortElements = 1 << 10;
 	ComPtr<ID3D12Resource> m_constantBuffer = nullptr;
-	ComPtr<ID3D12Resource> m_inputBuffer = nullptr;
+	ComPtr<ID3D12Resource> m_initialInputBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_sortedBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_sortedBufferCPUReadback = nullptr;
 
@@ -177,9 +177,14 @@ void HelloWorkGraphApplication::OnInitialize()
 	}
 #endif
 
+	m_numSortElements = std::bit_ceil(m_numSortElements);
+
 	CreateBasePipeline();
 
-	ExecuteComputeShader();
+	while (1)
+	{
+		ExecuteComputeShader();
+	}
 
 #if 0
 	if (!EnsureWorkGraphsSupported())
@@ -374,7 +379,7 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 	{
 		m_constantBuffer = CreateBuffer
 		(
-			sizeof(uint32_t) * m_numSortElements,
+			sizeof(ConstantBuffer),
 			D3D12_RESOURCE_FLAG_NONE,
 			D3D12_HEAP_TYPE_UPLOAD
 		);
@@ -390,7 +395,7 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 	{
 		auto randomEngine = std::mt19937();
 		auto random = std::uniform_int_distribution<uint32_t>(0, m_numSortElements - 1);
-		m_inputBuffer = CreateBuffer
+		m_initialInputBuffer = CreateBuffer
 		(
 			sizeof(uint32_t) * m_numSortElements,
 			D3D12_RESOURCE_FLAG_NONE,
@@ -398,12 +403,13 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 		);
 		uint32_t* buffer = nullptr;
 		auto range = CD3DX12_RANGE(0, sizeof(uint32_t) * m_numSortElements);
-		LWG_CHECK_HRESULT(m_inputBuffer->Map(0, &range, (void**)&buffer));
+		LWG_CHECK_HRESULT(m_initialInputBuffer->Map(0, &range, (void**)&buffer));
 		for (uint32_t i = 0; i < m_numSortElements; ++i)
 		{
 			buffer[i] = random(randomEngine);
 		}
-		m_inputBuffer->Unmap(0, NULL);
+		m_initialInputBuffer->Unmap(0, NULL);
+		m_initialInputBuffer->SetName(L"m_initialInputBuffer");
 	}
 
 	// Create output resource.
@@ -414,18 +420,16 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
 			D3D12_HEAP_TYPE_DEFAULT
 		);
+		m_sortedBuffer->SetName(L"m_sortedBuffer");
 		m_sortedBufferCPUReadback = CreateBuffer
 		(
 			sizeof(uint32_t) * m_numSortElements,
 			D3D12_RESOURCE_FLAG_NONE,
 			D3D12_HEAP_TYPE_READBACK
 		);
+		m_sortedBufferCPUReadback->SetName(L"m_sortedBufferCPUReadback");
 	}
 
-	D3D12_COMMAND_QUEUE_DESC commandQueueDesc = {};
-	commandQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_DISABLE_GPU_TIMEOUT;
-	commandQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-	LWG_CHECK_HRESULT(m_d3d12Device->CreateCommandQueue(&commandQueueDesc, IID_PPV_ARGS(&m_commandQueue)));
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
@@ -438,11 +442,12 @@ void HelloWorkGraphApplication::CreateComputePipeline()
 	auto computeShader = LearningWorkGraph::Shader();
 	LWG_CHECK(computeShader.CompileFromFile("Shader/Shader.shader", "CSMain", "cs_6_5"));
 
-	CD3DX12_ROOT_PARAMETER rootParameter[CBVSRVUAVRootParameterSlotID::Count] = {};
-	rootParameter[CBVSRVUAVRootParameterSlotID::ConstantBufferView].InitAsConstantBufferView(0, 0);
-	rootParameter[CBVSRVUAVRootParameterSlotID::ShaderResourceView].InitAsShaderResourceView(0, 0);
-	rootParameter[CBVSRVUAVRootParameterSlotID::UnorderedAccessView].InitAsUnorderedAccessView(0, 0);
-	auto rootSignatureDesc = CD3DX12_ROOT_SIGNATURE_DESC(CBVSRVUAVRootParameterSlotID::Count, rootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+	CD3DX12_ROOT_PARAMETER rootParameter[RootParameterSlotID::Count] = {};
+	rootParameter[RootParameterSlotID::Constants].InitAsConstants(2, 1, 0);
+	rootParameter[RootParameterSlotID::ConstantBufferView].InitAsConstantBufferView(0, 0);
+	rootParameter[RootParameterSlotID::ShaderResourceView].InitAsShaderResourceView(0, 0);
+	rootParameter[RootParameterSlotID::UnorderedAccessView].InitAsUnorderedAccessView(0, 0);
+	auto rootSignatureDesc = CD3DX12_ROOT_SIGNATURE_DESC(RootParameterSlotID::Count, rootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 	ComPtr<ID3DBlob> serialized = nullptr;
 	LWG_CHECK_HRESULT(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serialized, NULL));
 	LWG_CHECK_HRESULT(device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&m_computePipeline.m_rootSignature)));
@@ -456,22 +461,72 @@ void HelloWorkGraphApplication::CreateComputePipeline()
 void HelloWorkGraphApplication::ExecuteComputeShader()
 {
 	CreateComputePipeline();
+
+	{
+		{
+			std::array<D3D12_RESOURCE_BARRIER, 2> barriers = {};
+			barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_initialInputBuffer.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
+			barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(m_sortedBuffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST, 0);
+			m_commandList->ResourceBarrier(barriers.size(), barriers.data());
+		}
+		m_commandList->CopyBufferRegion(m_sortedBuffer.Get(), 0, m_initialInputBuffer.Get(), 0, sizeof(uint32_t) * m_numSortElements);
+		{
+			std::array<D3D12_RESOURCE_BARRIER, 2> barriers = {};
+			barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_initialInputBuffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON, 0);
+			barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(m_sortedBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0);
+			m_commandList->ResourceBarrier(barriers.size(), barriers.data());
+		}
+	}
+
+
+	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_sortedBuffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
+
 	m_commandList->SetComputeRootSignature(m_computePipeline.m_rootSignature.Get());
 	m_commandList->SetPipelineState(m_computePipeline.m_pipelineState.Get());
-	m_commandList->SetComputeRootConstantBufferView(CBVSRVUAVRootParameterSlotID::ConstantBufferView, m_constantBuffer->GetGPUVirtualAddress());
-	m_commandList->SetComputeRootShaderResourceView(CBVSRVUAVRootParameterSlotID::ShaderResourceView, m_inputBuffer->GetGPUVirtualAddress());
-	m_commandList->SetComputeRootUnorderedAccessView(CBVSRVUAVRootParameterSlotID::UnorderedAccessView, m_sortedBuffer->GetGPUVirtualAddress());
-	m_commandList->Dispatch(1, 1, 1);
+	m_commandList->SetComputeRootConstantBufferView(RootParameterSlotID::ConstantBufferView, m_constantBuffer->GetGPUVirtualAddress());
+	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortedBuffer->GetGPUVirtualAddress());
+
+	uint32_t log2n = static_cast<uint32_t>(std::log2f(m_numSortElements));
+	int B_indx, inc;
+
+	// Main-block.
+	for (uint32_t i = 0; i < log2n; ++i)
+	{
+		inc = 1 << i;
+		// Sub-block.
+		for (uint32_t j = 0; j < i + 1; ++j)
+		{
+			if (i != 0 || j != 0)
+			{
+				auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(m_sortedBuffer.Get());
+				m_commandList->ResourceBarrier(1, &barrier);
+			}
+			B_indx = 2;
+			struct Inputs final
+			{
+				uint32_t m_inc;
+				uint32_t m_dir;
+			} inputs = { inc * 2 / B_indx, 2 << i };
+			m_commandList->SetComputeRoot32BitConstants(RootParameterSlotID::Constants, 2, &inputs, 0);
+			m_commandList->Dispatch(max(1, m_numSortElements / B_indx / 1024), 1, 1);
+			inc /= B_indx;
+		}
+	}
 
 	// read results
-	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_sortedBuffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
-	m_commandList->ResourceBarrier(1, &barrier);
-	m_commandList->CopyResource(m_sortedBufferCPUReadback.Get(), m_sortedBuffer.Get());
+	{
+		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_sortedBuffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
+		m_commandList->ResourceBarrier(1, &barrier);
+		m_commandList->CopyResource(m_sortedBufferCPUReadback.Get(), m_sortedBuffer.Get());
+	}
 
 	// Close and execute the command list.
 	LWG_CHECK_HRESULT(m_commandList->Close());
 	ID3D12CommandList* commandLists[] = { m_commandList.Get()};
 	m_commandQueue->ExecuteCommandLists(1, commandLists);
+
+	m_swapChain->Present(1, 0);
+
 	LWG_CHECK_HRESULT(m_commandQueue->Signal(m_fence.Get(), ++m_fenceValue));
 
 	HANDLE commandListFinished = CreateEventA(NULL, FALSE, FALSE, NULL);
@@ -510,6 +565,7 @@ void HelloWorkGraphApplication::OnRender()
 int main()
 {
 	LearningWorkGraph::FrameworkDesc frameworkDesc = {};
+	frameworkDesc.m_useWindow = true;
 
 	auto framework = LearningWorkGraph::Framework();
 	framework.Initialize(frameworkDesc);

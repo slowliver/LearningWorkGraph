@@ -66,6 +66,34 @@ void Application::Initialize(const Framework* framework)
 		D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_d3d12Device));
 	}
 
+	D3D12_COMMAND_QUEUE_DESC commandQueueDesc = {};
+	commandQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_DISABLE_GPU_TIMEOUT;
+	commandQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	LWG_CHECK_HRESULT(m_d3d12Device->CreateCommandQueue(&commandQueueDesc, IID_PPV_ARGS(&m_commandQueue)));
+
+	if (auto hwnd = framework->GetHWND())
+	{
+		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+		swapChainDesc.BufferCount = 2;
+		swapChainDesc.Width = 16;
+		swapChainDesc.Height = 16;
+		swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+		swapChainDesc.SampleDesc.Count = 1;
+		ComPtr<IDXGISwapChain1> swapChain = nullptr;
+		LWG_CHECK_HRESULT(dxgiFactory4->CreateSwapChainForHwnd
+		(
+			m_commandQueue.Get(),        // Swap chain needs the queue so that it can force a flush on it.
+			hwnd,
+			&swapChainDesc,
+			nullptr,
+			nullptr,
+			&swapChain
+		));
+		swapChain.As(& m_swapChain);
+	}
+
 	LWG_CHECK_WITH_MESSAGE(m_d3d12Device, "Failed to initialize compiler.");
 
 	OnInitialize();

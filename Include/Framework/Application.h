@@ -30,7 +30,8 @@ protected:
 	static constexpr uint32_t k_frameCount = 2;
 	static Application* s_instance;
 	Microsoft::WRL::ComPtr<ID3D12Device9> m_d3d12Device = nullptr;
-	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue = nullptr;
+	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swapChain = nullptr;
 
 };
 }

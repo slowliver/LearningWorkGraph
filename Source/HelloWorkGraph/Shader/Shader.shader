@@ -3,8 +3,13 @@
 	uint numSortElements;
 };
 
+cbuffer constants : register(b1)
+{
+	uint inc;
+	uint dir;
+};
 
-ByteAddressBuffer input : register(t0);
+//ByteAddressBuffer input : register(t0);
 RWByteAddressBuffer Output : register(u0);
 
 [Shader("node")]
@@ -17,14 +22,41 @@ void BroadcastNode()
 }
 
 [numthreads(1024, 1, 1)]
-void CSMain(uint dispatchThreadID : SV_DispatchThreadID)
+void CSMain(uint dispatchThreadID : SV_DispatchThreadID, uint groupID : SV_GroupID)
 {
 	if (dispatchThreadID >= numSortElements)
 	{
 		return;
 	}
+	#if 0
 	uint value = input.Load(dispatchThreadID * 4);
-	Output.Store(dispatchThreadID * 4, value);
+	Output.Store(groupID * 4, inc);
+#endif
+	
+	int t = dispatchThreadID; // thread index
+	int low = t & (inc - 1); // low order bits (below INC)
+	int i = (t << 1) - low; // insert 0 at position INC
+	bool reverse = ((dir & i) == 0); // asc/desc order
+
+	// Load
+	uint x0 = Output.Load(i * 4);
+	uint x1 = Output.Load((inc + i) * 4);
+
+	// Sort
+	{
+		bool swap = reverse ^ (x0 > x1);
+		uint auxa = x0;
+		uint auxb = x1;
+		if (swap)
+		{
+			x0 = auxb;
+			x1 = auxa;
+		}
+	}
+
+	// Store
+	Output.Store(i * 4, x0);
+	Output.Store((inc + i) * 4, x1);
 }
 
 struct VSInput
