@@ -17,22 +17,95 @@ ConstantBuffer<PassConstantBuffer> passConstantBuffer : register(b1);
 //ByteAddressBuffer input : register(t0);
 RWByteAddressBuffer Output : register(u0);
 
-[Shader("node")]
-[NodeLaunch("broadcasting")]
-[NodeDispatchGrid(1, 1, 1)]
-[NumThreads(1, 1, 1)]
-void LaunchWorkGraph([MaxRecords(1)] EmptyNodeOutput SecondNode)
+struct MyRecord
 {
-	SecondNode.ThreadIncrementOutputCount(1);
-//	Output.Store3(0, uint3(0x6C6C6548, 0x6F57206F, 0x00646C72));
-}
+	uint numSortElements;
+};
+
+struct MyRecord2
+{
+	uint dispatchGrid : SV_DispatchGrid;
+	MyRecord myRecord;
+	uint inc;
+	uint dir;
+};
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NodeDispatchGrid(1, 1, 1)]
 [NumThreads(1, 1, 1)]
-void SecondNode()
+void LaunchWorkGraph
+(
+	DispatchNodeInputRecord<MyRecord> inputData,
+#if 1
+	[MaxRecords(1)] NodeOutput<MyRecord2> SecondNode
+#endif
+)
 {
+//	ThreadNodeOutputRecords<MyRecord> record = SecondNode.GetThreadNodeOutputRecords(1);
+//	record.Get().dispatchGrid = 1024;
+//	record.Get().index = dispatchThreadID;
+//	record.OutputComplete();
+	
+	const uint log2n = log2(inputData.Get().numSortElements);
+	uint inc = 0;
+#if 1
+	// Main-block.
+	for (uint i = 0; i <log2n; ++i)
+	{
+		inc = 1u << i;
+		// Sub-block.
+		for (uint j = 0; j < i + 1; ++j)
+		{
+			const bool isFirstStep = (i == 0 && j == 0);
+#if 0
+			if (!isFirstStep)
+			{
+				auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(m_sortedBuffer.Get());
+				m_commandList->ResourceBarrier(1, &barrier);
+			}
+#endif
+#if 0
+			PassConstantBuffer passConstantBuffer = { inc, 2 << i };
+			m_commandList->SetComputeRoot32BitConstants(RootParameterSlotID::PassConstants, sizeof(PassConstantBuffer) / sizeof(uint32_t), &passConstantBuffer, 0);
+			m_commandList->Dispatch(max(1, m_numSortElements / 2 / 1024), 1, 1);
+#endif
+
+			ThreadNodeOutputRecords<MyRecord2> record = SecondNode.GetThreadNodeOutputRecords(1);
+			record.Get().dispatchGrid = max(1, inputData.Get().numSortElements / 2 / 1024);
+			record.Get().myRecord = inputData.Get();
+			record.Get().inc = inc;
+			record.Get().dir = 2 << i;
+			record.OutputComplete();
+
+			inc /= 2;
+		}
+	}
+#endif
+#if 0
+	// Main-block.
+	for (uint i = 0; i <inputData.Get().numSortElements; ++i)
+	{
+		Output.Store(i * 4, i);
+	}
+#endif
+//	Output.Store3(0, uint3(0x6C6C6548, 0x6F57206F, 0x00646C72));
+}
+
+[Shader("node")]
+[NodeLaunch("broadcasting")]
+[NodeMaxDispatchGrid(2, 1, 1)]
+[NumThreads(1024, 1, 1)]
+void SecondNode
+(
+//	uint groupThreadID : SV_GroupThreadID,
+//	uint groupID : SV_GroupID,
+uint dispatchThreadID : SV_DispatchThreadID,
+	DispatchNodeInputRecord<MyRecord2> inputData
+)
+{
+	uint index = inputData.Get().inc;
+	Output.Store(dispatchThreadID * 4, dispatchThreadID);
 }
 
 [numthreads(1024, 1, 1)]

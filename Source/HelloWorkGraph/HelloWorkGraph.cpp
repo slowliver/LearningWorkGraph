@@ -43,8 +43,6 @@ THE SOFTWARE.
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 613; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
 
-#define UAV_SIZE 1024
-
 using Microsoft::WRL::ComPtr;
 
 class HelloWorkGraphApplication : public LearningWorkGraph::Application
@@ -109,7 +107,7 @@ private:
 	ComPtr<ID3D12Fence> m_fence = nullptr;
 	uint64_t m_fenceValue = 0;
 
-	uint32_t m_numSortElementsUnsafe = 1 << 16;
+	uint32_t m_numSortElementsUnsafe = 1 << 11;// 16;
 	uint32_t m_numSortElements = 0;;
 	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 	ComPtr<ID3D12Resource> m_gpuTimeCPUReadbackBuffer = nullptr;
@@ -162,7 +160,7 @@ void HelloWorkGraphApplication::OnInitialize()
 
 	CreateWorkGraphPipeline();
 
-	while (1)
+//	while (1)
 	{
 		ExecuteWorkGraph();
 	}
@@ -204,6 +202,12 @@ bool HelloWorkGraphApplication::RunCommandListAndWait()
 	{
 		ID3D12CommandList* commandLists[] = { m_commandList.Get() };
 		m_commandQueue->ExecuteCommandLists(1, commandLists);
+
+		if (m_swapChain)
+		{
+			m_swapChain->Present(1, 0);
+		}
+
 		m_commandQueue->Signal(m_fence.Get(), ++m_fenceValue);
 
 		HANDLE hCommandListFinished = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -268,7 +272,11 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 		LWG_CHECK_HRESULT(m_initialInputBuffer->Map(0, &range, (void**)&buffer));
 		for (uint32_t i = 0; i < m_numSortElements; ++i)
 		{
+#if 0
 			buffer[i] = (i < m_numSortElementsUnsafe) ? random(randomEngine) : UINT32_MAX;
+#else
+			buffer[i] = 0;
+#endif
 		}
 		m_initialInputBuffer->Unmap(0, NULL);
 		m_initialInputBuffer->SetName(L"initialInputBuffer");
@@ -473,12 +481,20 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 {
 	D3D12_SET_PROGRAM_DESC setProgramDesc = PrepareWorkGraph();
 
+	struct MyRecord
+	{
+		//	uint dispatchGrid : SV_DispatchGrid;
+		uint32_t numSortElements;
+	} myRecord = { m_numSortElements };
+
 	// dispatch work graph
 	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};
 	DispatchGraphDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
 	DispatchGraphDesc.NodeCPUInput = { };
 	DispatchGraphDesc.NodeCPUInput.EntrypointIndex = 0;
 	DispatchGraphDesc.NodeCPUInput.NumRecords = 1;
+	DispatchGraphDesc.NodeCPUInput.pRecords = &myRecord;
+	DispatchGraphDesc.NodeCPUInput.RecordStrideInBytes = sizeof(MyRecord);
 
 	m_commandList->SetComputeRootSignature(m_rootSignature.Get());
 	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortedBuffer->GetGPUVirtualAddress());
@@ -496,18 +512,22 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 	m_commandList->ResourceBarrier(1, &Barrier);
 	m_commandList->CopyResource(m_sortedCPUReadbackBuffer.Get(), m_sortedBuffer.Get());
 
-	char result[UAV_SIZE / sizeof(char)];
 	if (RunCommandListAndWait())
 	{
-		char* pOutput;
-		D3D12_RANGE range{ 0, UAV_SIZE };
-		if (SUCCEEDED(m_sortedCPUReadbackBuffer->Map(0, &range, (void**)&pOutput)))
+		// Readback to CPU memory.
+		uint32_t* outputTemp = nullptr;
+		auto output = std::unique_ptr<uint32_t[]>(new uint32_t[m_numSortElements]);
+		auto range = CD3DX12_RANGE(0, sizeof(uint32_t) * m_numSortElements);
+		LWG_CHECK_HRESULT(m_sortedCPUReadbackBuffer->Map(0, &range, (void**)&outputTemp));
+		memcpy(output.get(), outputTemp, sizeof(uint32_t) * m_numSortElements);
+		m_sortedCPUReadbackBuffer->Unmap(0, NULL);
+
+#if 1
+		for (uint32_t i = 0; i < m_numSortElementsUnsafe; ++i)
 		{
-			memcpy(result, pOutput, UAV_SIZE);
-			m_sortedCPUReadbackBuffer->Unmap(0, NULL);
-			printf("SUCCESS: Output was \"%s\"\n", result);
-			return;
+			printf("%u : %u\n", i, output[i]);
 		}
+#endif
 	}
 
 	LWG_CHECK_WITH_MESSAGE(true, "Failed to dispatch work graph and read results.");
@@ -522,7 +542,7 @@ void HelloWorkGraphApplication::OnRender()
 int main()
 {
 	LearningWorkGraph::FrameworkDesc frameworkDesc = {};
-	frameworkDesc.m_useWindow = false;
+	frameworkDesc.m_useWindow = true;
 
 	auto framework = LearningWorkGraph::Framework();
 	framework.Initialize(frameworkDesc);
