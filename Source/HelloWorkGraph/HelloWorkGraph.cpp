@@ -72,8 +72,8 @@ private:
 	ID3D12Resource* CreateBuffer(uint64_t Size, D3D12_RESOURCE_FLAGS ResourceFlags, D3D12_HEAP_TYPE HeapType);
 
 	bool EnsureWorkGraphsSupported();
-	D3D12_SET_PROGRAM_DESC PrepareWorkGraph(ComPtr<ID3D12StateObject> pStateObject);
-	bool RunCommandListAndWait(ComPtr<ID3D12CommandQueue> pCommandQueue, ComPtr<ID3D12CommandAllocator> pCommandAllocator, ComPtr<ID3D12GraphicsCommandList10> pCommandList, ComPtr<ID3D12Fence> pFence);
+	D3D12_SET_PROGRAM_DESC PrepareWorkGraph();
+	bool RunCommandListAndWait();
 
 	void CreateBasePipeline();
 
@@ -126,6 +126,10 @@ private:
 	struct WorkGraphPipeline
 	{
 		ComPtr<ID3D12StateObject> m_stateObject = nullptr;
+		ComPtr<ID3D12StateObjectProperties1> m_stateObjectProperties = nullptr;
+		ComPtr<ID3D12WorkGraphProperties> m_workGraphProperties = nullptr;
+		D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS m_memoryRequirements = {};
+		ComPtr<ID3D12Resource> m_backingMemoryBuffer = nullptr;
 	} m_workGraphPipeline = {};
 
 private:
@@ -158,7 +162,10 @@ void HelloWorkGraphApplication::OnInitialize()
 
 	CreateWorkGraphPipeline();
 
-	ExecuteWorkGraph();
+	while (1)
+	{
+		ExecuteWorkGraph();
+	}
 }
 
 bool HelloWorkGraphApplication::EnsureWorkGraphsSupported()
@@ -178,57 +185,38 @@ ID3D12Resource* HelloWorkGraphApplication::CreateBuffer(uint64_t size, D3D12_RES
 	return resource;
 }
 
-D3D12_SET_PROGRAM_DESC HelloWorkGraphApplication::PrepareWorkGraph(ComPtr<ID3D12StateObject> pStateObject)
+D3D12_SET_PROGRAM_DESC HelloWorkGraphApplication::PrepareWorkGraph()
 {
-	ComPtr<ID3D12Resource> pBackingMemoryResource = nullptr;
-
-	ComPtr<ID3D12StateObjectProperties1> pStateObjectProperties;
-	ComPtr<ID3D12WorkGraphProperties> pWorkGraphProperties;
-	pStateObject->QueryInterface(IID_PPV_ARGS(&pStateObjectProperties));
-	pStateObject->QueryInterface(IID_PPV_ARGS(&pWorkGraphProperties));
-
-	// GPU で使用するメモリを確保.
-	UINT index = pWorkGraphProperties->GetWorkGraphIndex(k_programName);
-	D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS MemoryRequirements = {};
-	pWorkGraphProperties->GetWorkGraphMemoryRequirements(index, &MemoryRequirements);
-	if (MemoryRequirements.MaxSizeInBytes > 0)
+	D3D12_SET_PROGRAM_DESC setProgramDesc = {};
+	setProgramDesc.Type = D3D12_PROGRAM_TYPE_WORK_GRAPH;
+	setProgramDesc.WorkGraph.ProgramIdentifier = m_workGraphPipeline.m_stateObjectProperties->GetProgramIdentifier(k_programName);
+	setProgramDesc.WorkGraph.Flags = D3D12_SET_WORK_GRAPH_FLAG_INITIALIZE;
+	if (m_workGraphPipeline.m_backingMemoryBuffer)
 	{
-		pBackingMemoryResource = CreateBuffer(MemoryRequirements.MaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_HEAP_TYPE_DEFAULT);
+		setProgramDesc.WorkGraph.BackingMemory = { m_workGraphPipeline.m_backingMemoryBuffer->GetGPUVirtualAddress(), m_workGraphPipeline.m_memoryRequirements.MaxSizeInBytes };
 	}
-
-	UINT test = pWorkGraphProperties->GetNumEntrypoints(index);
-
-	D3D12_SET_PROGRAM_DESC Desc = {};
-	Desc.Type = D3D12_PROGRAM_TYPE_WORK_GRAPH;
-	Desc.WorkGraph.ProgramIdentifier = pStateObjectProperties->GetProgramIdentifier(k_programName);
-	Desc.WorkGraph.Flags = D3D12_SET_WORK_GRAPH_FLAG_INITIALIZE;
-	if (pBackingMemoryResource)
-	{
-		Desc.WorkGraph.BackingMemory = { pBackingMemoryResource->GetGPUVirtualAddress(), MemoryRequirements.MaxSizeInBytes };
-	}
-
-	return Desc;
+	return setProgramDesc;
 }
 
-bool HelloWorkGraphApplication::RunCommandListAndWait(ComPtr<ID3D12CommandQueue> pCommandQueue, ComPtr<ID3D12CommandAllocator> pCommandAllocator, ComPtr<ID3D12GraphicsCommandList10> pCommandList, ComPtr<ID3D12Fence> pFence)
+bool HelloWorkGraphApplication::RunCommandListAndWait()
 {
-	if (SUCCEEDED(pCommandList->Close()))
+	if (SUCCEEDED(m_commandList->Close()))
 	{
-		ID3D12CommandList* commandLists[] = { pCommandList.Get() };
-		pCommandQueue->ExecuteCommandLists(1, commandLists);
-		pCommandQueue->Signal(pFence.Get(), ++m_fenceValue);
+		ID3D12CommandList* commandLists[] = { m_commandList.Get() };
+		m_commandQueue->ExecuteCommandLists(1, commandLists);
+		m_commandQueue->Signal(m_fence.Get(), ++m_fenceValue);
 
 		HANDLE hCommandListFinished = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 		if (hCommandListFinished)
 		{
-			pFence->SetEventOnCompletion(m_fenceValue, hCommandListFinished);
+			m_fence->SetEventOnCompletion(m_fenceValue, hCommandListFinished);
 			DWORD waitResult = WaitForSingleObject(hCommandListFinished, INFINITE);
 			CloseHandle(hCommandListFinished);
 
 			if (waitResult == WAIT_OBJECT_0 && SUCCEEDED(GetD3D12Device9()->GetDeviceRemovedReason()))
 			{
-				pCommandAllocator->Reset();
-				pCommandList->Reset(pCommandAllocator.Get(), nullptr);
+				m_commandAllocator->Reset();
+				m_commandList->Reset(m_commandAllocator.Get(), nullptr);
 				return true;
 			}
 		}
@@ -466,14 +454,24 @@ void HelloWorkGraphApplication::CreateWorkGraphPipeline()
 	workGraphDesc->SetProgramName(k_programName);
 
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateStateObject(desc, IID_PPV_ARGS(&m_workGraphPipeline.m_stateObject)));
+	LWG_CHECK_HRESULT(m_workGraphPipeline.m_stateObject.As(&m_workGraphPipeline.m_stateObjectProperties));
+	LWG_CHECK_HRESULT(m_workGraphPipeline.m_stateObject.As(&m_workGraphPipeline.m_workGraphProperties));
+
+	// GPU で使用するメモリを確保.
+	auto index = m_workGraphPipeline.m_workGraphProperties->GetWorkGraphIndex(k_programName);
+	m_workGraphPipeline.m_workGraphProperties->GetWorkGraphMemoryRequirements(index, &m_workGraphPipeline.m_memoryRequirements);
+	if (m_workGraphPipeline.m_memoryRequirements.MaxSizeInBytes > 0)
+	{
+		m_workGraphPipeline.m_backingMemoryBuffer = CreateBuffer(m_workGraphPipeline.m_memoryRequirements.MaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_HEAP_TYPE_DEFAULT);
+		m_workGraphPipeline.m_backingMemoryBuffer->SetName(L"backingMemoryBuffer");
+	}
+
+	//	UINT test = m_workGraphPipeline.m_workGraphProperties->GetNumEntrypoints(index);
 }
 
 void HelloWorkGraphApplication::ExecuteWorkGraph()
 {
-	ComPtr<ID3D12Resource> pUAVBuffer = CreateBuffer(UAV_SIZE, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_HEAP_TYPE_DEFAULT);
-	ComPtr<ID3D12Resource> pReadbackBuffer = CreateBuffer(UAV_SIZE, D3D12_RESOURCE_FLAG_NONE, D3D12_HEAP_TYPE_READBACK);
-
-	D3D12_SET_PROGRAM_DESC setProgramDesc = PrepareWorkGraph(m_workGraphPipeline.m_stateObject);
+	D3D12_SET_PROGRAM_DESC setProgramDesc = PrepareWorkGraph();
 
 	// dispatch work graph
 	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};
@@ -483,30 +481,30 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 	DispatchGraphDesc.NodeCPUInput.NumRecords = 1;
 
 	m_commandList->SetComputeRootSignature(m_rootSignature.Get());
-	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, pUAVBuffer->GetGPUVirtualAddress());
+	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortedBuffer->GetGPUVirtualAddress());
 	m_commandList->SetProgram(&setProgramDesc);
 	m_commandList->DispatchGraph(&DispatchGraphDesc);
 
 	// read results
 	D3D12_RESOURCE_BARRIER Barrier = {};
 	Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-	Barrier.Transition.pResource = pUAVBuffer.Get();
+	Barrier.Transition.pResource = m_sortedBuffer.Get();
 	Barrier.Transition.Subresource = 0;
 	Barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 	Barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
 
 	m_commandList->ResourceBarrier(1, &Barrier);
-	m_commandList->CopyResource(pReadbackBuffer.Get(), pUAVBuffer.Get());
+	m_commandList->CopyResource(m_sortedCPUReadbackBuffer.Get(), m_sortedBuffer.Get());
 
 	char result[UAV_SIZE / sizeof(char)];
-	if (RunCommandListAndWait(m_commandQueue, m_commandAllocator, m_commandList, m_fence))
+	if (RunCommandListAndWait())
 	{
 		char* pOutput;
 		D3D12_RANGE range{ 0, UAV_SIZE };
-		if (SUCCEEDED(pReadbackBuffer->Map(0, &range, (void**)&pOutput)))
+		if (SUCCEEDED(m_sortedCPUReadbackBuffer->Map(0, &range, (void**)&pOutput)))
 		{
 			memcpy(result, pOutput, UAV_SIZE);
-			pReadbackBuffer->Unmap(0, NULL);
+			m_sortedCPUReadbackBuffer->Unmap(0, NULL);
 			printf("SUCCESS: Output was \"%s\"\n", result);
 			return;
 		}
