@@ -117,7 +117,7 @@ private:
 	uint64_t m_fenceValue = 0;
 
 	uint32_t m_numSortElementsUnsafe = 1 << 16;
-	uint32_t m_numSortElements = 0;;
+	uint32_t m_numSortElements = 0;
 	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 	ComPtr<ID3D12Resource> m_gpuTimeCPUReadbackBuffer = nullptr;
 	ComPtr<ID3D12Resource> m_applicationConstantBuffer = nullptr;
