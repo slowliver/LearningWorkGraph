@@ -46,6 +46,8 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 
 using Microsoft::WRL::ComPtr;
 
+#define WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 0
+
 class HelloWorkGraphApplication : public LearningWorkGraph::Application
 {
 private:
@@ -301,6 +303,13 @@ void HelloWorkGraphApplication::PreExecute()
 			m_commandList->ResourceBarrier(barriers.size(), barriers.data());
 		}
 	}
+
+	// Set root signature and parameters.
+	{
+		m_commandList->SetComputeRootSignature(m_rootSignature.Get());
+		m_commandList->SetComputeRootConstantBufferView(RootParameterSlotID::ApplicationConstantBufferView, m_applicationConstantBuffer->GetGPUVirtualAddress());
+		m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortBuffer->GetGPUVirtualAddress());
+	}
 }
 
 void HelloWorkGraphApplication::PostExecute()
@@ -384,10 +393,7 @@ void HelloWorkGraphApplication::CreateComputePipeline()
 
 void HelloWorkGraphApplication::ExecuteComputeShader()
 {
-	m_commandList->SetComputeRootSignature(m_rootSignature.Get());
 	m_commandList->SetPipelineState(m_computePipeline.m_pipelineState.Get());
-	m_commandList->SetComputeRootConstantBufferView(RootParameterSlotID::ApplicationConstantBufferView, m_applicationConstantBuffer->GetGPUVirtualAddress());
-	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortBuffer->GetGPUVirtualAddress());
 
 	const uint32_t log2n = static_cast<uint32_t>(std::log2f(m_numSortElements));
 	uint32_t inc = 0;
@@ -414,8 +420,15 @@ void HelloWorkGraphApplication::ExecuteComputeShader()
 
 void HelloWorkGraphApplication::CreateWorkGraphPipeline()
 {
+	auto shaderDefines = std::vector<LearningWorkGraph::ShaderDefine>();
+#if defined(WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID) && WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	auto& shaderDefine = shaderDefines.emplace_back();
+	shaderDefine.m_key = "WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID";
+	shaderDefine.m_value = "1";
+#endif
+
 	auto shader = LearningWorkGraph::Shader();
-	LWG_CHECK(shader.CompileFromFile("Shader/Shader.shader", "", "lib_6_8"));
+	LWG_CHECK(shader.CompileFromFile("Shader/Shader.shader", "", "lib_6_8", &shaderDefines));
 
 	auto desc = CD3DX12_STATE_OBJECT_DESC(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
 
@@ -444,38 +457,29 @@ void HelloWorkGraphApplication::CreateWorkGraphPipeline()
 		m_workGraphPipeline.m_backingMemoryBuffer = CreateBuffer(m_workGraphPipeline.m_memoryRequirements.MaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_HEAP_TYPE_DEFAULT);
 		m_workGraphPipeline.m_backingMemoryBuffer->SetName(L"backingMemoryBuffer");
 	}
-
-	//	UINT test = m_workGraphPipeline.m_workGraphProperties->GetNumEntrypoints(index);
 }
 
 void HelloWorkGraphApplication::ExecuteWorkGraph()
 {
 	D3D12_SET_PROGRAM_DESC setProgramDesc = PrepareWorkGraph();
 
-#define WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 1
-
+#if defined(WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID) && WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	struct ApplicationRecord
 	{
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 		uint32_t m_dispatchGrid;
+	} applicationRecord = { max(1, m_numSortElements / 2 / 1024) };
 #endif
-		uint32_t m_numSortElements;
-	} applicationRecord = {};
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
-	applicationRecord.m_dispatchGrid = max(1, m_numSortElements / 2 / 1024);
-#endif
-	applicationRecord.m_numSortElements = m_numSortElements;
 
 	// dispatch work graph
 	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};
 	DispatchGraphDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
 	DispatchGraphDesc.NodeCPUInput.EntrypointIndex = 0;
+#if defined(WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID) && WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	DispatchGraphDesc.NodeCPUInput.NumRecords = 1;
 	DispatchGraphDesc.NodeCPUInput.pRecords = &applicationRecord;
 	DispatchGraphDesc.NodeCPUInput.RecordStrideInBytes = sizeof(ApplicationRecord);
+#endif
 
-	m_commandList->SetComputeRootSignature(m_rootSignature.Get());
-	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortBuffer->GetGPUVirtualAddress());
 	m_commandList->SetProgram(&setProgramDesc);
 	m_commandList->DispatchGraph(&DispatchGraphDesc);
 }

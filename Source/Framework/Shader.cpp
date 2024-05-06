@@ -73,7 +73,7 @@ Shader::~Shader()
 	Release();
 }
 
-bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPoint, std::string_view target)
+bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPoint, std::string_view target, const std::vector<ShaderDefine>* defines)
 {
 	Release();
 	auto utils = g_dxcompiler->GetUtils();
@@ -98,7 +98,25 @@ bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPo
 			DXC_ARG_DEBUG,
 #endif
 		};
- 		if (SUCCEEDED(compiler->Compile(sourceBlob.Get(), nullptr, wEntryPoint.get(), wTarget.get(), arguments, std::extent_v<decltype(arguments)>, nullptr, 0, nullptr, &result)))
+
+		auto wDefines = std::vector<DxcDefine>();
+		auto wDefinesHolder = std::vector<std::pair<std::wstring, std::wstring>>();
+		if (defines)
+		{
+			for (const auto& define : *defines)
+			{
+				auto& wDefine = wDefines.emplace_back();
+				auto& wDefineHolder = wDefinesHolder.emplace_back();
+				wDefineHolder.first.resize(MultiByteToWideChar(CP_ACP, 0, define.m_key.data(), -1, NULL, 0));
+				MultiByteToWideChar(CP_ACP, 0, define.m_key.data(), -1, wDefineHolder.first.data(), wDefineHolder.first.size());
+				wDefineHolder.second.resize(MultiByteToWideChar(CP_ACP, 0, define.m_value.data(), -1, NULL, 0));
+				MultiByteToWideChar(CP_ACP, 0, define.m_value.data(), -1, wDefineHolder.second.data(), wDefineHolder.second.size());
+				wDefine.Name = wDefineHolder.first.data();
+				wDefine.Value = wDefineHolder.second.data();
+			}
+		}
+
+ 		if (SUCCEEDED(compiler->Compile(sourceBlob.Get(), nullptr, wEntryPoint.get(), wTarget.get(), arguments, std::extent_v<decltype(arguments)>, wDefines.data(), wDefines.size(), nullptr, &result)))
 		{
 			HRESULT hr = {};
 			result->GetStatus(&hr);
@@ -113,7 +131,6 @@ bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPo
 			}
 			else
 			{
-//				ID3DBlob* data = nullptr;
 				ComPtr<IDxcBlobEncoding> errorBuffer = nullptr;
 				result->GetErrorBuffer(&errorBuffer);
 				if (errorBuffer)
@@ -126,7 +143,7 @@ bool Shader::CompileFromMemory(std::string_view source, std::string_view entryPo
 	return false;
 }
 
-bool Shader::CompileFromFile(std::string_view filePath, std::string_view entryPoint, std::string_view target)
+bool Shader::CompileFromFile(std::string_view filePath, std::string_view entryPoint, std::string_view target, const std::vector<ShaderDefine>* defines)
 {
 	char fullFilePath[MAX_PATH];
 	GetFullPathNameA(filePath.data(), MAX_PATH, fullFilePath, NULL);
@@ -143,7 +160,7 @@ bool Shader::CompileFromFile(std::string_view filePath, std::string_view entryPo
 		memory.push_back((char)c);
 	}
 	std::fclose(file);
-	return CompileFromMemory(std::string(memory.begin(), memory.end()), entryPoint, target);
+	return CompileFromMemory(std::string(memory.begin(), memory.end()), entryPoint, target, defines);
 }
 
 void Shader::Release()

@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-//#include <memory>
+#include <vector>
 #include <string>
 
 #include <windows.h>
@@ -11,12 +11,18 @@
 //struct ID3DBlob;
 namespace LearningWorkGraph
 {
+struct ShaderDefine
+{
+	std::string_view m_key;
+	std::string_view m_value;
+};
+
 class Shader
 {
 public:
 	~Shader();
-	bool CompileFromMemory(std::string_view source, std::string_view entryPoint, std::string_view target);
-	bool CompileFromFile(std::string_view filePath, std::string_view entryPoint, std::string_view target);
+	bool CompileFromMemory(std::string_view source, std::string_view entryPoint, std::string_view target, const std::vector<ShaderDefine>* defines = nullptr);
+	bool CompileFromFile(std::string_view filePath, std::string_view entryPoint, std::string_view target, const std::vector<ShaderDefine>* defines = nullptr);
 //	void Map(const char* sourcePath);
 
 	const void* GetData() const { return m_compilerBufferData.get(); }
