@@ -3,58 +3,22 @@
 
 #include <Windows.h>
 
-#if 0
-static LRESULT WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	auto* application = LearningWorkGraph::Application::GetMainApplication();
-
-	switch (message)
-	{
-	case WM_CREATE:
-	{
-		// Save the DXSample* passed in to CreateWindow.
-		LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
-		SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
-	}
-	return 0;
-
-	case WM_KEYDOWN:
-		if (application)
-		{
-			//			pSample->OnKeyDown(static_cast<UINT8>(wParam));
-		}
-		return 0;
-
-	case WM_KEYUP:
-		if (application)
-		{
-			//			pSample->OnKeyUp(static_cast<UINT8>(wParam));
-		}
-		return 0;
-
-#if 0
-	case WM_PAINT:
-		if (application)
-		{
-	//		application->OnUpdate();
-	//		application->OnRender();
-	//		application->Present();
-		}
-		return 0;
-#endif
-
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		return 0;
-	}
-
-	// Handle any messages the switch statement didn't.
-	return DefWindowProc(hWnd, message, wParam, lParam);
-}
-#endif
-
 namespace LearningWorkGraph
 {
+Framework* Framework::s_instance = nullptr;
+
+Framework::Framework()
+{
+	LWG_CHECK(!s_instance);
+	s_instance = this;
+}
+
+Framework::~Framework()
+{
+	LWG_CHECK(s_instance == this);
+	s_instance = nullptr;
+}
+
 void Framework::Initialize(const FrameworkDesc& desc)
 {
 	if (desc.m_useWindow)
@@ -66,7 +30,7 @@ void Framework::Initialize(const FrameworkDesc& desc)
 		WNDCLASSEX windowClass = { 0 };
 		windowClass.cbSize = sizeof(WNDCLASSEX);
 		windowClass.style = CS_HREDRAW | CS_VREDRAW;
-		windowClass.lpfnWndProc = ::DefWindowProc;// WindowProc;
+		windowClass.lpfnWndProc = DefWindowProcA;
 		windowClass.hInstance = instance;
 		windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
 		windowClass.lpszClassName = "DXSampleClass";
@@ -98,15 +62,34 @@ void Framework::Initialize(const FrameworkDesc& desc)
 
 void Framework::Run()
 {
-	// Main sample loop.
-	MSG msg = {};
-	while (msg.message != WM_QUIT)
+	if (m_hwnd)
 	{
-		// Process any messages in the queue.
-		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		// Main sample loop.
+		MSG msg = {};
+		while (msg.message != WM_QUIT)
 		{
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
+			if (auto* application = LearningWorkGraph::Application::GetMainApplication())
+			{
+				application->OnUpdate();
+				application->OnRender();
+			}
+			// Process any messages in the queue.
+			if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+			{
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+			}
+		}
+	}
+	else
+	{
+		while (true)
+		{
+			if (auto* application = LearningWorkGraph::Application::GetMainApplication())
+			{
+				application->OnUpdate();
+				application->OnRender();
+			}
 		}
 	}
 }

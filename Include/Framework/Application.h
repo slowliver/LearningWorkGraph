@@ -26,6 +26,8 @@ public:
 
 	static Application* GetMainApplication() { return s_instance; }
 
+	HWND GetHWND();
+
 protected:
 	static constexpr uint32_t k_frameCount = 2;
 	static Application* s_instance;

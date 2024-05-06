@@ -125,4 +125,14 @@ void Application::Terminate()
 	}
 #endif
 }
+
+HWND Application::GetHWND()
+{
+	HWND hwnd = {};
+	if (m_swapChain)
+	{
+		m_swapChain->GetHwnd(&hwnd);
+	}
+	return hwnd;
+}
 }

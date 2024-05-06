@@ -71,7 +71,6 @@ private:
 
 	bool EnsureWorkGraphsSupported();
 	D3D12_SET_PROGRAM_DESC PrepareWorkGraph();
-	bool RunCommandListAndWait();
 
 	void PreExecute();
 	void PostExecute();
@@ -110,7 +109,7 @@ private:
 	ComPtr<ID3D12Fence> m_fence = nullptr;
 	uint64_t m_fenceValue = 0;
 
-	uint32_t m_numSortElementsUnsafe = 1 << 11;// 16;
+	uint32_t m_numSortElementsUnsafe = 1 << 16;
 	uint32_t m_numSortElements = 0;;
 	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 	ComPtr<ID3D12Resource> m_gpuTimeCPUReadbackBuffer = nullptr;
@@ -143,37 +142,16 @@ private:
 
 void HelloWorkGraphApplication::OnInitialize()
 {
-	auto* d3d12Device9 = GetD3D12Device9();
-
-	m_numSortElements = std::bit_ceil(m_numSortElementsUnsafe);
-
-	CreateBasePipeline();
-
-#if 0
-	{
-		CreateComputePipeline();
-		while (1)
-		{
-			PreExecute();
-			ExecuteComputeShader();
-			PostExecute();
-		}
-	}
-#endif
-
 	if (!EnsureWorkGraphsSupported())
 	{
 		return;
 	}
 
-	CreateWorkGraphPipeline();
+	m_numSortElements = std::bit_ceil(m_numSortElementsUnsafe);
 
-//	while (1)
-	{
-		PreExecute();
-		ExecuteWorkGraph();
-		PostExecute();
-	}
+	CreateBasePipeline();
+	CreateComputePipeline();
+	CreateWorkGraphPipeline();
 }
 
 bool HelloWorkGraphApplication::EnsureWorkGraphsSupported()
@@ -204,39 +182,6 @@ D3D12_SET_PROGRAM_DESC HelloWorkGraphApplication::PrepareWorkGraph()
 		setProgramDesc.WorkGraph.BackingMemory = { m_workGraphPipeline.m_backingMemoryBuffer->GetGPUVirtualAddress(), m_workGraphPipeline.m_memoryRequirements.MaxSizeInBytes };
 	}
 	return setProgramDesc;
-}
-
-bool HelloWorkGraphApplication::RunCommandListAndWait()
-{
-	if (SUCCEEDED(m_commandList->Close()))
-	{
-		ID3D12CommandList* commandLists[] = { m_commandList.Get() };
-		m_commandQueue->ExecuteCommandLists(1, commandLists);
-
-		if (m_swapChain)
-		{
-			m_swapChain->Present(1, 0);
-		}
-
-		m_commandQueue->Signal(m_fence.Get(), ++m_fenceValue);
-
-		HANDLE hCommandListFinished = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-		if (hCommandListFinished)
-		{
-			m_fence->SetEventOnCompletion(m_fenceValue, hCommandListFinished);
-			DWORD waitResult = WaitForSingleObject(hCommandListFinished, INFINITE);
-			CloseHandle(hCommandListFinished);
-
-			if (waitResult == WAIT_OBJECT_0 && SUCCEEDED(GetD3D12Device9()->GetDeviceRemovedReason()))
-			{
-				m_commandAllocator->Reset();
-				m_commandList->Reset(m_commandAllocator.Get(), nullptr);
-				return true;
-			}
-		}
-	}
-
-	return false;
 }
 
 void HelloWorkGraphApplication::CreateBasePipeline()
@@ -353,6 +298,69 @@ void HelloWorkGraphApplication::PreExecute()
 
 void HelloWorkGraphApplication::PostExecute()
 {
+	m_commandList->EndQuery(m_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, m_queryIndex++);
+	m_commandList->ResolveQueryData(m_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, 2, m_gpuTimeCPUReadbackBuffer.Get(), 0);
+
+	// read results
+	{
+		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_sortBuffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
+		m_commandList->ResourceBarrier(1, &barrier);
+		m_commandList->CopyResource(m_sortCPUReadbackBuffer.Get(), m_sortBuffer.Get());
+	}
+
+	// Close and execute the command list.
+	LWG_CHECK_HRESULT(m_commandList->Close());
+	ID3D12CommandList* commandLists[] = { m_commandList.Get() };
+	m_commandQueue->ExecuteCommandLists(1, commandLists);
+
+	if (m_swapChain)
+	{
+		m_swapChain->Present(1, 0);
+	}
+
+	LWG_CHECK_HRESULT(m_commandQueue->Signal(m_fence.Get(), ++m_fenceValue));
+
+	HANDLE commandListFinished = CreateEventA(NULL, FALSE, FALSE, NULL);
+	LWG_CHECK(commandListFinished);
+
+	m_fence->SetEventOnCompletion(m_fenceValue, commandListFinished);
+	auto waitResult = WaitForSingleObject(commandListFinished, INFINITE);
+	LWG_CHECK(CloseHandle(commandListFinished));
+
+	if (waitResult == WAIT_OBJECT_0 && SUCCEEDED(GetD3D12Device9()->GetDeviceRemovedReason()))
+	{
+		LWG_CHECK_HRESULT(m_commandAllocator->Reset());
+		LWG_CHECK_HRESULT(m_commandList->Reset(m_commandAllocator.Get(), nullptr));
+	}
+
+	// Readback to CPU memory.
+	uint32_t* outputTemp = nullptr;
+	auto output = std::unique_ptr<uint32_t[]>(new uint32_t[m_numSortElements]);
+	auto range = CD3DX12_RANGE(0, sizeof(uint32_t) * m_numSortElements);
+	LWG_CHECK_HRESULT(m_sortCPUReadbackBuffer->Map(0, &range, (void**)&outputTemp));
+	memcpy(output.get(), outputTemp, sizeof(uint32_t) * m_numSortElements);
+	m_sortCPUReadbackBuffer->Unmap(0, NULL);
+
+#if 0
+	for (uint32_t i = 0; i < m_numSortElementsUnsafe; ++i)
+	{
+		printf("%u : %u\n", i, output[i]);
+	}
+#endif
+
+	{
+		uint64_t gpuTimeFrequency = 0;
+		m_commandQueue->GetTimestampFrequency(&gpuTimeFrequency);
+		uint64_t* queryResultPointer = nullptr;
+		auto range = CD3DX12_RANGE(0, sizeof(uint64_t) * 2);
+		LWG_CHECK_HRESULT(m_gpuTimeCPUReadbackBuffer->Map(0, &range, (void**)&queryResultPointer));
+		const auto gpuTime = (queryResultPointer[1] - queryResultPointer[0]) * 1000.0f / gpuTimeFrequency;
+		m_gpuTimeCPUReadbackBuffer->Unmap(0, NULL);
+		char gpuTimeText[256] = {};
+		sprintf(gpuTimeText, "GPU Time : %fms\n", gpuTime);
+		printf(gpuTimeText);
+		SetConsoleTitleA(gpuTimeText);
+	}
 }
 
 void HelloWorkGraphApplication::CreateComputePipeline()
@@ -394,69 +402,6 @@ void HelloWorkGraphApplication::ExecuteComputeShader()
 			inc /= 2;
 		}
 	}
-
-	m_commandList->EndQuery(m_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, m_queryIndex++);
-	m_commandList->ResolveQueryData(m_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, 2, m_gpuTimeCPUReadbackBuffer.Get(), 0);
-
-	// read results
-	{
-		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_sortBuffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, 0);
-		m_commandList->ResourceBarrier(1, &barrier);
-		m_commandList->CopyResource(m_sortCPUReadbackBuffer.Get(), m_sortBuffer.Get());
-	}
-
-	// Close and execute the command list.
-	LWG_CHECK_HRESULT(m_commandList->Close());
-	ID3D12CommandList* commandLists[] = { m_commandList.Get()};
-	m_commandQueue->ExecuteCommandLists(1, commandLists);
-
-	if (m_swapChain)
-	{
-		m_swapChain->Present(1, 0);
-	}
-
-	LWG_CHECK_HRESULT(m_commandQueue->Signal(m_fence.Get(), ++m_fenceValue));
-
-	HANDLE commandListFinished = CreateEventA(NULL, FALSE, FALSE, NULL);
-	LWG_CHECK(commandListFinished);
-
-	m_fence->SetEventOnCompletion(m_fenceValue, commandListFinished);
-	auto waitResult = WaitForSingleObject(commandListFinished, INFINITE);
-	LWG_CHECK(CloseHandle(commandListFinished));
-
-	if (waitResult == WAIT_OBJECT_0 && SUCCEEDED(GetD3D12Device9()->GetDeviceRemovedReason()))
-	{
-		LWG_CHECK_HRESULT(m_commandAllocator->Reset());
-		LWG_CHECK_HRESULT(m_commandList->Reset(m_commandAllocator.Get(), nullptr));
-	}
-
-	{
-		uint64_t gpuTimeFrequency = 0;
-		m_commandQueue->GetTimestampFrequency(&gpuTimeFrequency);
-		uint64_t* queryResultPointer = nullptr;
-		auto range = CD3DX12_RANGE(0, sizeof(uint64_t) * 2);
-		LWG_CHECK_HRESULT(m_gpuTimeCPUReadbackBuffer->Map(0, &range, (void**)&queryResultPointer));
-		const auto gpuTime = (queryResultPointer[1] - queryResultPointer[0]) * 1000.0f / gpuTimeFrequency;
-		m_gpuTimeCPUReadbackBuffer->Unmap(0, NULL);
-		char gpuTimeText[256] = {};
-		sprintf(gpuTimeText, "GPU Time : %fms\n", gpuTime);
-		printf(gpuTimeText);
-	}
-
-	// Readback to CPU memory.
-	uint32_t* outputTemp = nullptr;
-	auto output = std::unique_ptr<uint32_t[]>(new uint32_t[m_numSortElements]);
-	auto range = CD3DX12_RANGE(0, sizeof(uint32_t) * m_numSortElements);
-	LWG_CHECK_HRESULT(m_sortCPUReadbackBuffer->Map(0, &range, (void**)&outputTemp));
-	memcpy(output.get(), outputTemp, sizeof(uint32_t) * m_numSortElements);
-	m_sortCPUReadbackBuffer->Unmap(0, NULL);
-
-#if 0
-	for (uint32_t i = 0; i < m_numSortElementsUnsafe; ++i)
-	{
-		printf("%u : %u\n", i, output[i]);
-	}
-#endif
 }
 
 void HelloWorkGraphApplication::CreateWorkGraphPipeline()
@@ -518,49 +463,35 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortBuffer->GetGPUVirtualAddress());
 	m_commandList->SetProgram(&setProgramDesc);
 	m_commandList->DispatchGraph(&DispatchGraphDesc);
-
-	// read results
-	D3D12_RESOURCE_BARRIER Barrier = {};
-	Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-	Barrier.Transition.pResource = m_sortBuffer.Get();
-	Barrier.Transition.Subresource = 0;
-	Barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-	Barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-
-	m_commandList->ResourceBarrier(1, &Barrier);
-	m_commandList->CopyResource(m_sortCPUReadbackBuffer.Get(), m_sortBuffer.Get());
-
-	if (RunCommandListAndWait())
-	{
-		// Readback to CPU memory.
-		uint32_t* outputTemp = nullptr;
-		auto output = std::unique_ptr<uint32_t[]>(new uint32_t[m_numSortElements]);
-		auto range = CD3DX12_RANGE(0, sizeof(uint32_t) * m_numSortElements);
-		LWG_CHECK_HRESULT(m_sortCPUReadbackBuffer->Map(0, &range, (void**)&outputTemp));
-		memcpy(output.get(), outputTemp, sizeof(uint32_t) * m_numSortElements);
-		m_sortCPUReadbackBuffer->Unmap(0, NULL);
-
-#if 1
-		for (uint32_t i = 0; i < m_numSortElementsUnsafe; ++i)
-		{
-			printf("%u : %u\n", i, output[i]);
-		}
-#endif
-	}
-
-	LWG_CHECK_WITH_MESSAGE(true, "Failed to dispatch work graph and read results.");
 }
 
 void HelloWorkGraphApplication::OnUpdate()
-{}
+{
+}
 
 void HelloWorkGraphApplication::OnRender()
-{}
+{
+
+#if 0
+	{
+		PreExecute();
+		ExecuteComputeShader();
+		PostExecute();
+	}
+#endif
+
+	{
+		LearningWorkGraph::Framework::ShowDialog("Test", "Test");
+		PreExecute();
+		ExecuteWorkGraph();
+		PostExecute();
+	}
+}
 
 int main()
 {
 	LearningWorkGraph::FrameworkDesc frameworkDesc = {};
-	frameworkDesc.m_useWindow = true;
+	frameworkDesc.m_useWindow = false;
 
 	auto framework = LearningWorkGraph::Framework();
 	framework.Initialize(frameworkDesc);

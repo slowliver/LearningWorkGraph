@@ -15,7 +15,7 @@ ConstantBuffer<ApplicationConstantBuffer> applicationConstantBuffer : register(b
 ConstantBuffer<PassConstantBuffer> passConstantBuffer : register(b1);
 
 //ByteAddressBuffer input : register(t0);
-RWByteAddressBuffer Output : register(u0);
+globallycoherent  RWByteAddressBuffer Output : register(u0);
 
 struct MyRecord
 {
@@ -42,11 +42,6 @@ void LaunchWorkGraph
 #endif
 )
 {
-//	ThreadNodeOutputRecords<MyRecord> record = SecondNode.GetThreadNodeOutputRecords(1);
-//	record.Get().dispatchGrid = 1024;
-//	record.Get().index = dispatchThreadID;
-//	record.OutputComplete();
-	
 	const uint log2n = log2(inputData.Get().numSortElements);
 	uint inc = 0;
 #if 1
@@ -55,27 +50,21 @@ void LaunchWorkGraph
 	{
 		inc = 1u << i;
 		// Sub-block.
-		for (uint j = 0; j < i + 1; ++j)
+		//for (uint j = 0; j < i + 1; ++j)
+		for (uint j = 0; j < 1; ++j)
 		{
 			const bool isFirstStep = (i == 0 && j == 0);
-#if 0
+
 			if (!isFirstStep)
 			{
-				auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(m_sortedBuffer.Get());
-				m_commandList->ResourceBarrier(1, &barrier);
+				Barrier(Output, DEVICE_SCOPE | GROUP_SYNC);
 			}
-#endif
-#if 0
-			PassConstantBuffer passConstantBuffer = { inc, 2 << i };
-			m_commandList->SetComputeRoot32BitConstants(RootParameterSlotID::PassConstants, sizeof(PassConstantBuffer) / sizeof(uint32_t), &passConstantBuffer, 0);
-			m_commandList->Dispatch(max(1, m_numSortElements / 2 / 1024), 1, 1);
-#endif
 
 			ThreadNodeOutputRecords<MyRecord2> record = SecondNode.GetThreadNodeOutputRecords(1);
 			record.Get().dispatchGrid = max(1, inputData.Get().numSortElements / 2 / 1024);
 			record.Get().myRecord = inputData.Get();
 			record.Get().inc = inc;
-			record.Get().dir = 2 << i;
+			record.Get().dir = 2u << i;
 			record.OutputComplete();
 
 			inc /= 2;
@@ -94,17 +83,15 @@ void LaunchWorkGraph
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-[NodeMaxDispatchGrid(2, 1, 1)]
+[NodeMaxDispatchGrid(65535, 1, 1)]
 [NumThreads(1024, 1, 1)]
 void SecondNode
 (
-//	uint groupThreadID : SV_GroupThreadID,
-//	uint groupID : SV_GroupID,
 	uint dispatchThreadID : SV_DispatchThreadID,
 	DispatchNodeInputRecord<MyRecord2> inputData
 )
 {
-	if (dispatchThreadID >= applicationConstantBuffer.numSortElements / 2)
+	if (dispatchThreadID >= inputData.Get().myRecord.numSortElements / 2)
 	{
 		return;
 	}
@@ -126,7 +113,7 @@ void SecondNode
 		{
 			// Store
 			Output.Store(i * 4, b);
-			Output.Store((i + passConstantBuffer.inc) * 4, a);
+			Output.Store((i + inputData.Get().inc) * 4, a);
 		}
 	}
 }

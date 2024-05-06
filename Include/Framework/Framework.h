@@ -17,13 +17,20 @@ struct FrameworkDesc
 class Framework
 {
 public:
+	Framework();
+	~Framework();
+
 	void Initialize(const FrameworkDesc& desc);
 	void Run();
 	void Terminate() {}
 
 	HWND GetHWND() const { return m_hwnd; }
 
+	static Framework* GetMainFramework() { return s_instance; }
 	static void ShowDialog(std::string_view title, std::string_view message);
+
+private:
+	static Framework* s_instance;
 
 private:
 	HWND m_hwnd = {};
