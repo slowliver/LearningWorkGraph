@@ -451,20 +451,19 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 {
 	D3D12_SET_PROGRAM_DESC setProgramDesc = PrepareWorkGraph();
 
-	struct MyRecord
+	struct ApplicationRecord
 	{
 		//	uint dispatchGrid : SV_DispatchGrid;
 		uint32_t numSortElements;
-	} myRecord = { m_numSortElements };
+	} applicationRecord = { m_numSortElements };
 
 	// dispatch work graph
 	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};
 	DispatchGraphDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
-	DispatchGraphDesc.NodeCPUInput = { };
 	DispatchGraphDesc.NodeCPUInput.EntrypointIndex = 0;
 	DispatchGraphDesc.NodeCPUInput.NumRecords = 1;
-	DispatchGraphDesc.NodeCPUInput.pRecords = &myRecord;
-	DispatchGraphDesc.NodeCPUInput.RecordStrideInBytes = sizeof(MyRecord);
+	DispatchGraphDesc.NodeCPUInput.pRecords = &applicationRecord;
+	DispatchGraphDesc.NodeCPUInput.RecordStrideInBytes = sizeof(ApplicationRecord);
 
 	m_commandList->SetComputeRootSignature(m_rootSignature.Get());
 	m_commandList->SetComputeRootUnorderedAccessView(RootParameterSlotID::UnorderedAccessView, m_sortBuffer->GetGPUVirtualAddress());

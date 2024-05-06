@@ -1,14 +1,14 @@
 ﻿globallycoherent  RWByteAddressBuffer output : register(u0);
 
-struct MyRecord
+struct ApplicationRecord
 {
 	uint numSortElements;
 };
 
-struct MyRecord2
+struct PassRecord
 {
 	uint dispatchGrid : SV_DispatchGrid;
-	MyRecord myRecord;
+	ApplicationRecord applicationRecord;
 	uint inc;
 	uint dir;
 };
@@ -19,13 +19,11 @@ struct MyRecord2
 [NumThreads(1, 1, 1)]
 void LaunchWorkGraph
 (
-	DispatchNodeInputRecord<MyRecord> inputData,
-#if 1
-	[MaxRecords(1)] NodeOutput<MyRecord2> SecondNode
-#endif
+	DispatchNodeInputRecord<ApplicationRecord> applicationRecord,
+	[MaxRecords(1)] NodeOutput<PassRecord> SecondNode
 )
 {
-	const uint log2n = log2(inputData.Get().numSortElements);
+const uint log2n = log2(applicationRecord.Get().numSortElements);
 	uint inc = 0;
 
 	// Main-block.
@@ -43,9 +41,9 @@ void LaunchWorkGraph
 				Barrier(output, DEVICE_SCOPE | GROUP_SYNC);
 			}
 
-			ThreadNodeOutputRecords<MyRecord2> record = SecondNode.GetThreadNodeOutputRecords(1);
-			record.Get().dispatchGrid = max(1, inputData.Get().numSortElements / 2 / 1024);
-			record.Get().myRecord = inputData.Get();
+			ThreadNodeOutputRecords<PassRecord> record = SecondNode.GetThreadNodeOutputRecords(1);
+			record.Get().dispatchGrid = max(1, applicationRecord.Get().numSortElements / 2 / 1024);
+			record.Get().applicationRecord = applicationRecord.Get();
 			record.Get().inc = inc;
 			record.Get().dir = 2u << i;
 			record.OutputComplete();
@@ -62,32 +60,32 @@ void LaunchWorkGraph
 void SecondNode
 (
 	uint dispatchThreadID : SV_DispatchThreadID,
-	DispatchNodeInputRecord<MyRecord2> inputData
+	DispatchNodeInputRecord<PassRecord> passRecord
 )
 {
-	if (dispatchThreadID >= inputData.Get().myRecord.numSortElements / 2)
+	if (dispatchThreadID >= passRecord.Get().applicationRecord.numSortElements / 2)
 	{
 		return;
 	}
 
 	// https://www.bealto.com/gpu-sorting_parallel-bitonic-1.html	
-	const uint mask = (inputData.Get().inc - 1);
+	const uint mask = (passRecord.Get().inc - 1);
 	const uint low = mask & dispatchThreadID; // low order bits (below INC)
 	const uint i = (dispatchThreadID * 2) - low; // insert 0 at position INC
 
 	// Load
 	const uint a = output.Load(i * 4);
-	const uint b = output.Load((i + inputData.Get().inc) * 4);
+	const uint b = output.Load((i + passRecord.Get().inc) * 4);
 
 	// Sort & Store
 	{
-		const bool reverse = ((inputData.Get().dir & i) == 0); // asc/desc order
+		const bool reverse = ((passRecord.Get().dir & i) == 0); // asc/desc order
 		const bool swap = reverse ? (a >= b) : (a < b);
 		if (swap)
 		{
 			// Store
 			output.Store(i * 4, b);
-			output.Store((i + inputData.Get().inc) * 4, a);
+			output.Store((i + passRecord.Get().inc) * 4, a);
 		}
 	}
 }
