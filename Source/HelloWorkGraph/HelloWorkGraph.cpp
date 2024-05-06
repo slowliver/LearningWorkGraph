@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <array>
 #include <random>
 #include <bit>
+#include <functional>
 
 #include <windows.h>
 #include <d3d12.h>
@@ -84,6 +85,12 @@ private:
 	void ExecuteWorkGraph();
 
 private:
+	enum class PipelineMode
+	{
+		Compute,
+		WorkGraph,
+		Count
+	} m_pipelineMode = PipelineMode::Compute;
 	struct ConstantBufferRegisterID
 	{
 		enum
@@ -467,25 +474,30 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 
 void HelloWorkGraphApplication::OnUpdate()
 {
+	if (GetKeyState(VK_F1) & 0x8000)
+	{
+		m_pipelineMode = PipelineMode::Compute;
+	}
+	else if (GetKeyState(VK_F2) & 0x8000)
+	{
+		m_pipelineMode = PipelineMode::WorkGraph;
+	}
 }
 
 void HelloWorkGraphApplication::OnRender()
 {
+	PreExecute();
 
-#if 0
+	if (m_pipelineMode == PipelineMode::Compute)
 	{
-		PreExecute();
 		ExecuteComputeShader();
-		PostExecute();
 	}
-#endif
-
+	else if (m_pipelineMode == PipelineMode::WorkGraph)
 	{
-		LearningWorkGraph::Framework::ShowDialog("Test", "Test");
-		PreExecute();
 		ExecuteWorkGraph();
-		PostExecute();
 	}
+
+	PostExecute();
 }
 
 int main()
