@@ -1,131 +1,62 @@
 ﻿globallycoherent  RWByteAddressBuffer output : register(u0);
 
-#if 0
+#define WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 1
+
 struct ApplicationRecord
 {
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	uint dispatchGrid : SV_DispatchGrid;
+#endif
 	uint numSortElements;
 };
 
 struct PassRecord
 {
+#if !WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	uint dispatchGrid : SV_DispatchGrid;
-	ApplicationRecord applicationRecord;
+#endif
+	uint numSortElements;
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	uint index;
+#endif
 	uint inc;
 	uint dir;
 };
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+[NodeMaxDispatchGrid(65535, 1, 1)]
+[NumThreads(1024, 1, 1)]
+#else
 [NodeDispatchGrid(1, 1, 1)]
 [NumThreads(1, 1, 1)]
+#endif
 void LaunchWorkGraph
 (
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	uint dispatchThreadID : SV_DispatchThreadID,
+#endif
 	DispatchNodeInputRecord<ApplicationRecord> applicationRecord,
 	[MaxRecords(1)] NodeOutput<PassRecord> SecondNode
 )
 {
-const uint log2n = log2(applicationRecord.Get().numSortElements);
-	uint inc = 0;
-
-	// Main-block.
-	for (uint i = 0; i <log2n; ++i)
-	{
-		inc = 1u << i;
-		// Sub-block.
-		//for (uint j = 0; j < i + 1; ++j)
-		for (uint j = 0; j < 1; ++j)
-		{
-			const bool isFirstStep = (i == 0 && j == 0);
-
-			if (!isFirstStep)
-			{
-				Barrier(output, DEVICE_SCOPE | GROUP_SYNC);
-			}
-
-			ThreadNodeOutputRecords<PassRecord> record = SecondNode.GetThreadNodeOutputRecords(1);
-			record.Get().dispatchGrid = max(1, applicationRecord.Get().numSortElements / 2 / 1024);
-			record.Get().applicationRecord = applicationRecord.Get();
-			record.Get().inc = inc;
-			record.Get().dir = 2u << i;
-			record.OutputComplete();
-
-			inc /= 2;
-		}
-	}
-}
-
-[Shader("node")]
-[NodeLaunch("broadcasting")]
-[NodeMaxDispatchGrid(65535, 1, 1)]
-[NumThreads(1024, 1, 1)]
-void SecondNode
-(
-	uint dispatchThreadID : SV_DispatchThreadID,
-	DispatchNodeInputRecord<PassRecord> passRecord
-)
-{
-	if (dispatchThreadID >= passRecord.Get().applicationRecord.numSortElements / 2)
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	if (dispatchThreadID >= applicationRecord.Get().numSortElements / 2)
 	{
 		return;
 	}
-
-	// https://www.bealto.com/gpu-sorting_parallel-bitonic-1.html	
-	const uint mask = (passRecord.Get().inc - 1);
-	const uint low = mask & dispatchThreadID; // low order bits (below INC)
-	const uint i = (dispatchThreadID * 2) - low; // insert 0 at position INC
-
-	// Load
-	const uint a = output.Load(i * 4);
-	const uint b = output.Load((i + passRecord.Get().inc) * 4);
-
-	// Sort & Store
-	{
-		const bool reverse = ((passRecord.Get().dir & i) == 0); // asc/desc order
-		const bool swap = reverse ? (a >= b) : (a < b);
-		if (swap)
-		{
-			// Store
-			output.Store(i * 4, b);
-			output.Store((i + passRecord.Get().inc) * 4, a);
-		}
-	}
-}
 #endif
 
-struct ApplicationRecord
-{
-	uint dispatchGrid : SV_DispatchGrid;
-	uint numSortElements;
-};
-
-struct PassRecord
-{
-	uint numSortElements;
-	uint inc;
-	uint dir;
-};
-
-[Shader("node")]
-[NodeLaunch("broadcasting")]
-[NodeMaxDispatchGrid(65535, 1, 1)]
-[NumThreads(1024, 1, 1)]
-void LaunchWorkGraph
-(
-	DispatchNodeInputRecord<ApplicationRecord> applicationRecord,
-	[MaxRecords(1)] NodeOutput<PassRecord> SecondNode
-)
-{
 	const uint log2n = log2(applicationRecord.Get().numSortElements);
 	uint inc = 0;
 
-#if 0
 	// Main-block.
 	for (uint i = 0; i <log2n; ++i)
 	{
 		inc = 1u << i;
 		// Sub-block.
-		//for (uint j = 0; j < i + 1; ++j)
-		for (uint j = 0; j < 1; ++j)
+		for (uint j = 0; j < i + 1; ++j)
 		{
 			const bool isFirstStep = (i == 0 && j == 0);
 
@@ -135,41 +66,63 @@ void LaunchWorkGraph
 			}
 
 			ThreadNodeOutputRecords<PassRecord> record = SecondNode.GetThreadNodeOutputRecords(1);
+#if !WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 			record.Get().dispatchGrid = max(1, applicationRecord.Get().numSortElements / 2 / 1024);
-			record.Get().applicationRecord = applicationRecord.Get();
-			record.Get().inc = inc;
+#endif
+			record.Get().numSortElements = applicationRecord.Get().numSortElements;
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+			record.Get().index = dispatchThreadID;
+#endif
+			record.Get().inc =inc;
 			record.Get().dir = 2u << i;
 			record.OutputComplete();
 
 			inc /= 2;
 		}
 	}
-#endif
 }
 
 [Shader("node")]
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+[NodeLaunch("thread")]
+#else
 [NodeLaunch("broadcasting")]
-[NodeDispatchGrid(1, 1, 1)]
+[NodeMaxDispatchGrid(65535, 1, 1)]
 [NumThreads(1024, 1, 1)]
+#endif
 void SecondNode
 (
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	ThreadNodeInputRecord< PassRecord> passRecord
+#else
 	uint dispatchThreadID : SV_DispatchThreadID,
 	DispatchNodeInputRecord<PassRecord> passRecord
+#endif
 )
 {
-	if (dispatchThreadID >= passRecord.Get().numSortElements / 2)
+	const uint numSortElements = passRecord.Get().numSortElements;
+	const uint inc = passRecord.Get().inc;
+	const uint dir = passRecord.Get().dir;
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	const uint index = passRecord.Get().index;
+#else
+	const uint index = dispatchThreadID;
+#endif
+#if !WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	if (dispatchThreadID >= numSortElements / 2)
 	{
 		return;
 	}
+#endif
 
 	// https://www.bealto.com/gpu-sorting_parallel-bitonic-1.html	
-	const uint mask = (passRecord.Get().inc - 1);
-	const uint low = mask & dispatchThreadID; // low order bits (below INC)
-	const uint i = (dispatchThreadID * 2) - low; // insert 0 at position INC
+	const uint mask = (inc - 1);
+	const uint low = mask & index; // low order bits (below INC)
+	const uint i = (index * 2) - low; // insert 0 at position INC
 
 	// Load
 	const uint a = output.Load(i * 4);
-	const uint b = output.Load((i + passRecord.Get().inc) * 4);
+	const uint b = output.Load((i + inc) * 4);
 
 	// Sort & Store
 	{
@@ -179,7 +132,7 @@ void SecondNode
 		{
 			// Store
 			output.Store(i * 4, b);
-			output.Store((i + passRecord.Get().inc) * 4, a);
+			output.Store((i + inc) * 4, a);
 		}
 	}
 }

@@ -116,7 +116,7 @@ private:
 	ComPtr<ID3D12Fence> m_fence = nullptr;
 	uint64_t m_fenceValue = 0;
 
-	uint32_t m_numSortElementsUnsafe = 1 << 16;
+	uint32_t m_numSortElementsUnsafe = 1 << 4;// 16;
 	uint32_t m_numSortElements = 0;
 	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 	ComPtr<ID3D12Resource> m_gpuTimeCPUReadbackBuffer = nullptr;
@@ -348,7 +348,7 @@ void HelloWorkGraphApplication::PostExecute()
 	memcpy(output.get(), outputTemp, sizeof(uint32_t) * m_numSortElements);
 	m_sortCPUReadbackBuffer->Unmap(0, NULL);
 
-#if 0
+#if 1
 	for (uint32_t i = 0; i < m_numSortElementsUnsafe; ++i)
 	{
 		printf("%u : %u\n", i, output[i]);
@@ -452,13 +452,19 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 {
 	D3D12_SET_PROGRAM_DESC setProgramDesc = PrepareWorkGraph();
 
+#define WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 1
+
 	struct ApplicationRecord
 	{
-#if 1
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 		uint32_t m_dispatchGrid;
 #endif
 		uint32_t m_numSortElements;
-	} applicationRecord = { max(1, m_numSortElements / 2 / 1024), m_numSortElements };
+	} applicationRecord = {};
+#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+	applicationRecord.m_dispatchGrid = max(1, m_numSortElements / 2 / 1024);
+#endif
+	applicationRecord.m_numSortElements = m_numSortElements;
 
 	// dispatch work graph
 	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};
