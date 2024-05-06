@@ -364,7 +364,8 @@ void HelloWorkGraphApplication::PostExecute()
 		const auto gpuTime = (queryResultPointer[1] - queryResultPointer[0]) * 1000.0f / gpuTimeFrequency;
 		m_gpuTimeCPUReadbackBuffer->Unmap(0, NULL);
 		char gpuTimeText[256] = {};
-		sprintf(gpuTimeText, "GPU Time : %fms\n", gpuTime);
+		const char* pipelineModeText = m_pipelineMode == PipelineMode::Compute ? "Compute" : "Work Graph";
+		sprintf(gpuTimeText, "Pipeline Mode: %s, GPU Time: %fms\n", pipelineModeText, gpuTime);
 		printf(gpuTimeText);
 		SetConsoleTitleA(gpuTimeText);
 	}
@@ -453,9 +454,11 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 
 	struct ApplicationRecord
 	{
-		//	uint dispatchGrid : SV_DispatchGrid;
-		uint32_t numSortElements;
-	} applicationRecord = { m_numSortElements };
+#if 1
+		uint32_t m_dispatchGrid;
+#endif
+		uint32_t m_numSortElements;
+	} applicationRecord = { max(1, m_numSortElements / 2 / 1024), m_numSortElements };
 
 	// dispatch work graph
 	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};

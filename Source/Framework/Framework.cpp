@@ -44,7 +44,7 @@ void Framework::Initialize(const FrameworkDesc& desc)
 		(
 			0,
 			windowClass.lpszClassName,
-			"Test",
+			"Learning Work Graph",
 			WS_OVERLAPPEDWINDOW,
 			CW_USEDEFAULT,
 			CW_USEDEFAULT,
