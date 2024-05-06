@@ -100,12 +100,35 @@ void SecondNode
 (
 //	uint groupThreadID : SV_GroupThreadID,
 //	uint groupID : SV_GroupID,
-uint dispatchThreadID : SV_DispatchThreadID,
+	uint dispatchThreadID : SV_DispatchThreadID,
 	DispatchNodeInputRecord<MyRecord2> inputData
 )
 {
-	uint index = inputData.Get().inc;
-	Output.Store(dispatchThreadID * 4, dispatchThreadID);
+	if (dispatchThreadID >= applicationConstantBuffer.numSortElements / 2)
+	{
+		return;
+	}
+
+	// https://www.bealto.com/gpu-sorting_parallel-bitonic-1.html	
+	const uint mask = (inputData.Get().inc - 1);
+	const uint low = mask & dispatchThreadID; // low order bits (below INC)
+	const uint i = (dispatchThreadID * 2) - low; // insert 0 at position INC
+
+	// Load
+	const uint a = Output.Load(i * 4);
+	const uint b = Output.Load((i + inputData.Get().inc) * 4);
+
+	// Sort & Store
+	{
+		const bool reverse = ((inputData.Get().dir & i) == 0); // asc/desc order
+		const bool swap = reverse ? (a >= b) : (a < b);
+		if (swap)
+		{
+			// Store
+			Output.Store(i * 4, b);
+			Output.Store((i + passConstantBuffer.inc) * 4, a);
+		}
+	}
 }
 
 [numthreads(1024, 1, 1)]
