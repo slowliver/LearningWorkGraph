@@ -46,7 +46,7 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 
 using Microsoft::WRL::ComPtr;
 
-#define WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 0
+#define WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 1
 
 class HelloWorkGraphApplication : public LearningWorkGraph::Application
 {
@@ -119,7 +119,7 @@ private:
 	ComPtr<ID3D12Fence> m_fence = nullptr;
 	uint64_t m_fenceValue = 0;
 
-	uint32_t m_numSortElementsUnsafe = 1 << 16;
+	uint32_t m_numSortElementsUnsafe = 1 << 4;
 	uint32_t m_numSortElements = 0;
 	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 	ComPtr<ID3D12Resource> m_gpuTimeCPUReadbackBuffer = nullptr;
@@ -281,11 +281,7 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 		LWG_CHECK_HRESULT(m_initialBuffer->Map(0, &range, (void**)&buffer));
 		for (uint32_t i = 0; i < m_numSortElements; ++i)
 		{
-#if 1
 			buffer[i] = (i < m_numSortElementsUnsafe) ? random(randomEngine) : UINT32_MAX;
-#else
-			buffer[i] = 0;
-#endif
 		}
 		m_initialBuffer->Unmap(0, NULL);
 		m_initialBuffer->SetName(L"initialInputBuffer");

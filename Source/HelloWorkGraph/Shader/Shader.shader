@@ -8,6 +8,30 @@ ConstantBuffer<ApplicationConstantBuffer> applicationConstantBuffer : register(b
 
 globallycoherent  RWByteAddressBuffer output : register(u0);
 
+// https://www.bealto.com/gpu-sorting_parallel-bitonic-1.html	
+void BitonicSort(uint index, uint inc, uint dir)
+{
+	const uint mask = (inc - 1);
+	const uint low = mask & index; // low order bits (below INC)
+	const uint i = (index * 2) - low; // insert 0 at position INC
+
+	// Load
+	const uint a = output.Load(i * 4);
+	const uint b = output.Load((i + inc) * 4);
+
+	// Sort & Store
+	{
+		const bool reverse = ((dir & i) == 0); // asc/desc order
+		const bool swap = reverse ? (a >= b) : (a < b);
+		if (swap)
+		{
+			// Store
+			output.Store(i * 4, b);
+			output.Store((i + inc) * 4, a);
+		}
+	}
+}
+
 #if defined(WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID) && WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 #	define ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 1
 #else
@@ -41,13 +65,13 @@ struct PassRecord
 [NodeDispatchGrid(1, 1, 1)]
 [NumThreads(1, 1, 1)]
 #endif
-void LaunchWorkGraph
+void LaunchWorkGraphNode
 (
 #if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	uint dispatchThreadID : SV_DispatchThreadID,
 	DispatchNodeInputRecord<LaunchRecord> launchRecord,
 #endif
-	[MaxRecords(1)] NodeOutput<PassRecord> SecondNode
+	[MaxRecords(1)] NodeOutput<PassRecord> BitonicSortNode
 )
 {
 #if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
@@ -74,15 +98,15 @@ void LaunchWorkGraph
 				Barrier(output, DEVICE_SCOPE | GROUP_SYNC);
 			}
 
-			ThreadNodeOutputRecords<PassRecord> record = SecondNode.GetThreadNodeOutputRecords(1);
+			ThreadNodeOutputRecords<PassRecord> passRecord = BitonicSortNode.GetThreadNodeOutputRecords(1);
 #if !ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
-			record.Get().dispatchGrid = max(1, applicationConstantBuffer.numSortElements / 2 / 1024);
+			passRecord.Get().dispatchGrid = max(1, applicationConstantBuffer.numSortElements / 2 / 1024);
 #else
-			record.Get().index = dispatchThreadID;
+			passRecord.Get().index = dispatchThreadID;
 #endif
-			record.Get().inc =inc;
-			record.Get().dir = 2u << i;
-			record.OutputComplete();
+			passRecord.Get().inc =inc;
+			passRecord.Get().dir = 2u << i;
+			passRecord.OutputComplete();
 
 			inc /= 2;
 		}
@@ -97,7 +121,7 @@ void LaunchWorkGraph
 [NodeMaxDispatchGrid(65535, 1, 1)]
 [NumThreads(1024, 1, 1)]
 #endif
-void SecondNode
+void BitonicSortNode
 (
 #if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	ThreadNodeInputRecord<PassRecord> passRecord
@@ -107,40 +131,20 @@ void SecondNode
 #endif
 )
 {
-	const uint inc = passRecord.Get().inc;
-	const uint dir = passRecord.Get().dir;
 #if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	const uint index = passRecord.Get().index;
 #else
 	const uint index = dispatchThreadID;
 #endif
+	const uint inc = passRecord.Get().inc;
+	const uint dir = passRecord.Get().dir;
 #if !ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	if (dispatchThreadID >= applicationConstantBuffer.numSortElements / 2)
 	{
 		return;
 	}
 #endif
-
-	// https://www.bealto.com/gpu-sorting_parallel-bitonic-1.html	
-	const uint mask = (inc - 1);
-	const uint low = mask & index; // low order bits (below INC)
-	const uint i = (index * 2) - low; // insert 0 at position INC
-
-	// Load
-	const uint a = output.Load(i * 4);
-	const uint b = output.Load((i + inc) * 4);
-
-	// Sort & Store
-	{
-		const bool reverse = ((dir & i) == 0); // asc/desc order
-		const bool swap = reverse ? (a >= b) : (a < b);
-		if (swap)
-		{
-			// Store
-			output.Store(i * 4, b);
-			output.Store((i + inc) * 4, a);
-		}
-	}
+	BitonicSort(index, inc, dir);
 }
 
 struct PassConstantBuffer
@@ -152,31 +156,11 @@ struct PassConstantBuffer
 ConstantBuffer<PassConstantBuffer> passConstantBuffer : register(b1);
 
 [numthreads(1024, 1, 1)]
-void CSMain(uint dispatchThreadID : SV_DispatchThreadID, uint groupID : SV_GroupID)
+void CSMain(uint dispatchThreadID : SV_DispatchThreadID)
 {
 	if (dispatchThreadID >= applicationConstantBuffer.numSortElements / 2)
 	{
 		return;
 	}
-
-	// https://www.bealto.com/gpu-sorting_parallel-bitonic-1.html	
-	const uint mask = (passConstantBuffer.inc - 1);
-	const uint low = mask & dispatchThreadID; // low order bits (below INC)
-	const uint i = (dispatchThreadID * 2) - low; // insert 0 at position INC
-
-	// Load
-	const uint a = output.Load(i * 4);
-	const uint b = output.Load((i + passConstantBuffer.inc) * 4);
-
-	// Sort & Store
-	{
-		const bool reverse = ((passConstantBuffer.dir & i) == 0); // asc/desc order
-		const bool swap = reverse ? (a >= b) : (a < b);
-		if (swap)
-		{
-			// Store
-			output.Store(i * 4, b);
-			output.Store((i + passConstantBuffer.inc) * 4, a);
-		}
-	}
+	BitonicSort(dispatchThreadID, passConstantBuffer.inc, passConstantBuffer.dir);
 }
