@@ -8,9 +8,13 @@ ConstantBuffer<ApplicationConstantBuffer> applicationConstantBuffer : register(b
 
 globallycoherent  RWByteAddressBuffer output : register(u0);
 
-#define WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 0
+#if defined(WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID) && WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#	define ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 1
+#else
+#	define ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID 0
+#endif
 
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 struct LaunchRecord
 {
 	uint dispatchGrid : SV_DispatchGrid;
@@ -19,7 +23,7 @@ struct LaunchRecord
 
 struct PassRecord
 {
-#if !WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if !ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	uint dispatchGrid : SV_DispatchGrid;
 #else
 	uint index;
@@ -30,7 +34,7 @@ struct PassRecord
 
 [Shader("node")]
 [NodeLaunch("broadcasting")]
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 [NodeMaxDispatchGrid(65535, 1, 1)]
 [NumThreads(1024, 1, 1)]
 #else
@@ -39,17 +43,17 @@ struct PassRecord
 #endif
 void LaunchWorkGraph
 (
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	uint dispatchThreadID : SV_DispatchThreadID,
 	DispatchNodeInputRecord<LaunchRecord> launchRecord,
 #endif
 	[MaxRecords(1)] NodeOutput<PassRecord> SecondNode
 )
 {
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	if (dispatchThreadID >= applicationConstantBuffer.numSortElements / 2)
 	{
-//		return;
+		return;
 	}
 #endif
 
@@ -71,7 +75,7 @@ void LaunchWorkGraph
 			}
 
 			ThreadNodeOutputRecords<PassRecord> record = SecondNode.GetThreadNodeOutputRecords(1);
-#if !WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if !ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 			record.Get().dispatchGrid = max(1, applicationConstantBuffer.numSortElements / 2 / 1024);
 #else
 			record.Get().index = dispatchThreadID;
@@ -86,7 +90,7 @@ void LaunchWorkGraph
 }
 
 [Shader("node")]
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 [NodeLaunch("thread")]
 #else
 [NodeLaunch("broadcasting")]
@@ -95,7 +99,7 @@ void LaunchWorkGraph
 #endif
 void SecondNode
 (
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	ThreadNodeInputRecord<PassRecord> passRecord
 #else
 	uint dispatchThreadID : SV_DispatchThreadID,
@@ -105,15 +109,15 @@ void SecondNode
 {
 	const uint inc = passRecord.Get().inc;
 	const uint dir = passRecord.Get().dir;
-#if WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	const uint index = passRecord.Get().index;
 #else
 	const uint index = dispatchThreadID;
 #endif
-#if !WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
+#if !ENABLE_WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
 	if (dispatchThreadID >= applicationConstantBuffer.numSortElements / 2)
 	{
-//		return;
+		return;
 	}
 #endif
 

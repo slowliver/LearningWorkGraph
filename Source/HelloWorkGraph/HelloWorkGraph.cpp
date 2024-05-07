@@ -65,11 +65,12 @@ private:
 	static_assert(sizeof(PassConstantBuffer) % 4 == 0);
 
 public:
-	virtual void OnInitialize() override;
+	virtual void OnInitialize(const LearningWorkGraph::ApplicationDesc& applicationDesc) override;
 	virtual void OnUpdate() override;
 	virtual void OnRender() override;
 
 private:
+	void ProcessCommandLineArguments(uint32_t argc, const char** argvs);
 	ID3D12Resource* CreateBuffer(uint64_t Size, D3D12_RESOURCE_FLAGS ResourceFlags, D3D12_HEAP_TYPE HeapType);
 
 	bool EnsureWorkGraphsSupported();
@@ -118,7 +119,7 @@ private:
 	ComPtr<ID3D12Fence> m_fence = nullptr;
 	uint64_t m_fenceValue = 0;
 
-	uint32_t m_numSortElementsUnsafe = 1 << 4;// 16;
+	uint32_t m_numSortElementsUnsafe = 1 << 16;
 	uint32_t m_numSortElements = 0;
 	ComPtr<ID3D12RootSignature> m_rootSignature = nullptr;
 	ComPtr<ID3D12Resource> m_gpuTimeCPUReadbackBuffer = nullptr;
@@ -149,8 +150,52 @@ private:
 
 };
 
-void HelloWorkGraphApplication::OnInitialize()
+void HelloWorkGraphApplication::ProcessCommandLineArguments(uint32_t argc, const char** argvs)
 {
+	auto getKeyAndValue = [=](std::string arg) -> std::pair<std::string, std::string>
+	{
+		std::pair<std::string, std::string> keyAndValue;
+		auto& key = keyAndValue.first;
+		auto& value = keyAndValue.second;
+
+		// Key
+		key.resize(arg.size());
+		std::transform(arg.cbegin(), arg.cend(), key.begin(), tolower);
+		const auto s = arg.find_first_of('=');
+		key = std::string(key, 0, s);
+
+		// Value
+		if (s != std::string::npos)
+		{
+			value = std::string(arg, s + 1);
+		}
+
+		return keyAndValue;
+	};
+
+	for (size_t i = 1; i < argc; ++i)
+	{
+		auto keyAndValue = getKeyAndValue(argvs[i]);
+		const auto& key = keyAndValue.first;
+		const auto& value = keyAndValue.second;
+		if (key == "--num-sort-elements")
+		{
+			m_numSortElementsUnsafe = atoi(value.c_str());
+		}
+		else if (key == "--launch-pipeline-mode")
+		{
+			if (value == "WorkGraph")
+			{
+				m_pipelineMode = PipelineMode::WorkGraph;
+			}
+		}
+	}
+}
+
+void HelloWorkGraphApplication::OnInitialize(const LearningWorkGraph::ApplicationDesc& applicationDesc)
+{
+	ProcessCommandLineArguments(applicationDesc.m_argc, applicationDesc.m_argv);
+
 	if (!EnsureWorkGraphsSupported())
 	{
 		return;
@@ -165,10 +210,10 @@ void HelloWorkGraphApplication::OnInitialize()
 
 bool HelloWorkGraphApplication::EnsureWorkGraphsSupported()
 {
-	D3D12_FEATURE_DATA_D3D12_OPTIONS21 Options = {};
-	GetD3D12Device9()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS21, &Options, sizeof(Options));
-	LWG_CHECK_WITH_MESSAGE(Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED, "Failed to ensure work graphs were supported. Check driver and graphics card.");
-	return (Options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED);
+	D3D12_FEATURE_DATA_D3D12_OPTIONS21 options = {};
+	m_d3d12Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS21, &options, sizeof(options));
+	LWG_CHECK_WITH_MESSAGE(options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED, "Failed to ensure work graphs were supported. Check driver and graphics card.");
+	return (options.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED);
 }
 
 ID3D12Resource* HelloWorkGraphApplication::CreateBuffer(uint64_t size, D3D12_RESOURCE_FLAGS resourceFlags, D3D12_HEAP_TYPE heapType)
@@ -224,7 +269,7 @@ void HelloWorkGraphApplication::CreateBasePipeline()
 	// Create inital buffer.
 	{
 		auto randomEngine = std::mt19937();
-		auto random = std::uniform_int_distribution<uint32_t>(0, m_numSortElements - 1);
+		auto random = std::uniform_int_distribution<uint32_t>(0, m_numSortElementsUnsafe - 1);
 		m_initialBuffer = CreateBuffer
 		(
 			sizeof(uint32_t) * m_numSortElements,
@@ -471,17 +516,17 @@ void HelloWorkGraphApplication::ExecuteWorkGraph()
 #endif
 
 	// dispatch work graph
-	D3D12_DISPATCH_GRAPH_DESC DispatchGraphDesc = {};
-	DispatchGraphDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
-	DispatchGraphDesc.NodeCPUInput.EntrypointIndex = 0;
+	D3D12_DISPATCH_GRAPH_DESC dispatchGraphDesc = {};
+	dispatchGraphDesc.Mode = D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
+	dispatchGraphDesc.NodeCPUInput.EntrypointIndex = 0;
+	dispatchGraphDesc.NodeCPUInput.NumRecords = 1; // InputRecord ‚ª‹ó‚Å‚à NumRecords = 1 ‚É‚µ‚È‚¢‚Æ Dispatch ‚³‚ê‚È‚¢–Í—l.
 #if defined(WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID) && WORK_GRAPH_LAUNCHED_MULTI_DISPATCH_GRID
-	DispatchGraphDesc.NodeCPUInput.NumRecords = 1;
-	DispatchGraphDesc.NodeCPUInput.pRecords = &applicationRecord;
-	DispatchGraphDesc.NodeCPUInput.RecordStrideInBytes = sizeof(ApplicationRecord);
+	dispatchGraphDesc.NodeCPUInput.pRecords = &applicationRecord;
+	dispatchGraphDesc.NodeCPUInput.RecordStrideInBytes = sizeof(ApplicationRecord);
 #endif
 
 	m_commandList->SetProgram(&setProgramDesc);
-	m_commandList->DispatchGraph(&DispatchGraphDesc);
+	m_commandList->DispatchGraph(&dispatchGraphDesc);
 }
 
 void HelloWorkGraphApplication::OnUpdate()
@@ -512,7 +557,7 @@ void HelloWorkGraphApplication::OnRender()
 	PostExecute();
 }
 
-int main()
+int main(int argc, const char** argv)
 {
 	LearningWorkGraph::FrameworkDesc frameworkDesc = {};
 	frameworkDesc.m_useWindow = false;
@@ -520,8 +565,13 @@ int main()
 	auto framework = LearningWorkGraph::Framework();
 	framework.Initialize(frameworkDesc);
 
+	LearningWorkGraph::ApplicationDesc applicationDesc = {};
+	applicationDesc.m_framework = &framework;
+	applicationDesc.m_argc = argc;
+	applicationDesc.m_argv = argv;
+
 	auto application = HelloWorkGraphApplication();
-	application.Initialize(&framework);
+	application.Initialize(applicationDesc);
 
 	framework.Run();
 

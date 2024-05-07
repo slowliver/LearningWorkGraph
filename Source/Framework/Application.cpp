@@ -20,9 +20,9 @@ Application::~Application()
 	s_instance = nullptr;
 }
 
-void Application::Initialize(const Framework* framework)
+void Application::Initialize(const ApplicationDesc& applicationDesc)
 {
-	LWG_CHECK(framework);
+	LWG_CHECK(applicationDesc.m_framework);
 
 	UINT dxgiFactoryFlags = 0;
 
@@ -77,7 +77,7 @@ void Application::Initialize(const Framework* framework)
 	queryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
 	LWG_CHECK_HRESULT(m_d3d12Device->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&m_queryHeap)));
 
-	if (auto hwnd = framework->GetHWND())
+	if (auto hwnd = applicationDesc.m_framework->GetHWND())
 	{
 		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
 		swapChainDesc.BufferCount = 2;
@@ -102,7 +102,7 @@ void Application::Initialize(const Framework* framework)
 
 	LWG_CHECK_WITH_MESSAGE(m_d3d12Device, "Failed to initialize compiler.");
 
-	OnInitialize();
+	OnInitialize(applicationDesc);
 }
 
 void Application::Terminate()

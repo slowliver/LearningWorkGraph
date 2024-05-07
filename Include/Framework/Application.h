@@ -9,18 +9,26 @@
 namespace LearningWorkGraph
 {
 class Framework;
+
+struct ApplicationDesc
+{
+	const Framework* m_framework;
+	uint32_t m_argc;
+	const char** m_argv;
+};
+
 class Application
 {
 public:
 	Application();
 	~Application();
 
-	void Initialize(const Framework* framework);
+	void Initialize(const ApplicationDesc& applicationDesc);
 	void Terminate();
 
 	ID3D12Device9* GetD3D12Device9() { return m_d3d12Device.Get(); }
 
-	virtual void OnInitialize() = 0;
+	virtual void OnInitialize(const ApplicationDesc& applicationDesc) = 0;
 	virtual void OnUpdate() = 0;
 	virtual void OnRender() = 0;
 
